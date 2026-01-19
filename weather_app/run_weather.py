@@ -1,7 +1,7 @@
 import logging
 import os
 
-
+import utils
 import weather
 from typing import List
 from dotenv import load_dotenv
@@ -33,12 +33,19 @@ def run():
     except Exception as e:
         logger.exception(f"Error retrieving weather info: {e}")
 
-    message = ""
+    vbml_components = []
+
     for now in weather_data:
-        message += weather.format_weather_line(now) + "\n"
+        weather_string = weather.format_weather_line(now)
+        component = utils.compose_vbml_component(weather_string)
+        vbml_components.append(component)
+
+    vbml_payload = utils.compose_vbml_payload(vbml_components)
+    vbml_layout = vb.vbml_compose(vbml_payload)
+
     try:
-        vb.send_message(message)
-        logger.info(f"Message sent:\n{message}")
+        vb.send_layout(vbml_layout)
+        logger.info(f"Message sent:\n{vbml_layout}")
     except Exception as e:
         logger.exception(f"Error sending message: {e}")
 
