@@ -19,7 +19,8 @@ class VestaboardMessenger:
     """
 
     VESTABOARD_URL = "https://rw.vestaboard.com/"
-    VBML_URL = "https://vbml.vestaboard.com/format"
+    VBML_URL_FORMAT = "https://vbml.vestaboard.com/format"
+    VBML_URL_COMPOSE = "https://vbml.vestaboard.com/compose"
     HEADER_NAME = "X-Vestaboard-Read-Write-Key"
 
     def __init__(self, api_key: Optional[str] = None, timeout_s: int = 10):
@@ -75,10 +76,21 @@ class VestaboardMessenger:
         resp.raise_for_status()
         return resp.json()
 
-    def vbml_format(self, message: str) -> List[List]:
+    def vbml_format_message(self, message: str) -> List[List]:
         payload = {"message": message}
         resp = requests.post(
             self.VBML_URL,
+            json=payload,
+            headers=self.headers,
+            timeout=self.timeout_s
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def vbml_compose(self, payload) -> List[List]:
+        payload = payload
+        resp = requests.post(
+            self.VBML_URL_COMPOSE,
             json=payload,
             headers=self.headers,
             timeout=self.timeout_s
