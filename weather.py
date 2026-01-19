@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
-
+from cities import CITY_COORDS
 import requests
 
 
@@ -43,6 +43,7 @@ class WeatherClient:
         self.lat = lat if lat is not None else float(os.getenv("WEATHER_LAT", "47.67"))
         self.lon = lon if lon is not None else float(os.getenv("WEATHER_LON", "-122.12"))
         self.city = (city if city is not None else os.getenv("WEATHER_CITY", "SEATTLE")).strip().upper()
+        self.cities_coords = CITY_COORDS
 
         self.temp_unit = (temp_unit if temp_unit is not None else os.getenv("WEATHER_UNIT", "fahrenheit")).strip().lower()
         self.wind_unit = (wind_unit if wind_unit is not None else os.getenv("WEATHER_WIND_UNIT", "mph")).strip().lower()
@@ -88,6 +89,22 @@ class WeatherClient:
             wind_speed=wind,
             wind_unit=wind_unit,
         )
+
+    def get_current_weather_multi_cities(self):
+        results: Dict[str, WeatherNow] = {}
+
+        for city, (lat, lon) in self.cities_coords.items():
+            client = WeatherClient(
+                lat=lat,
+                lon=lon,
+                city=city,
+                temp_unit=self.temp_unit,
+                wind_unit=self.wind_unit,
+                timeout_s=self.timeout_s,
+            )
+            results[city] = client.get_current_weather()
+
+        return results
 
     @staticmethod
     def _weathercode_to_text(code: int) -> str:
