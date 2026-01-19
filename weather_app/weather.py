@@ -1,9 +1,8 @@
 import os
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
-from cities import CITY_COORDS
+from weather_app.cities import CITY_COORDS
 import requests
-
 
 @dataclass(frozen=True)
 class WeatherNow:
