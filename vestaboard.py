@@ -1,7 +1,7 @@
 from http.client import responses
 from dotenv import load_dotenv
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pathlib import Path
 import requests
 
@@ -19,6 +19,7 @@ class VestaboardMessenger:
     """
 
     VESTABOARD_URL = "https://rw.vestaboard.com/"
+    VBML_URL = "https://vbml.vestaboard.com/format"
     HEADER_NAME = "X-Vestaboard-Read-Write-Key"
 
     def __init__(self, api_key: Optional[str] = None, timeout_s: int = 10):
@@ -60,7 +61,7 @@ class VestaboardMessenger:
         resp.raise_for_status()
         return resp.json()
 
-    def send_layout(self, layout: Any) -> Dict[str, Any]:
+    def send_layout(self, layout: List[List]) -> Dict[str, Any]:
         """Send a pre-formatted layout (character-code array or similar).
 
         Use this if you already converted text to Vestaboard character codes.
@@ -73,3 +74,15 @@ class VestaboardMessenger:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def vbml_format(self, message: str) -> List[List]:
+        payload = {"message": message}
+        resp = requests.post(
+            self.VBML_URL,
+            json=payload,
+            headers=self.headers,
+            timeout=self.timeout_s
+        )
+        resp.raise_for_status()
+        return resp.json()
+
