@@ -2,7 +2,7 @@ from http.client import responses
 from dotenv import load_dotenv
 import os
 from typing import Any, Dict, Optional
-
+from pathlib import Path
 import requests
 
 
@@ -22,8 +22,9 @@ class VestaboardMessenger:
     HEADER_NAME = "X-Vestaboard-Read-Write-Key"
 
     def __init__(self, api_key: Optional[str] = None, timeout_s: int = 10):
-        # Prefer explicit arg, otherwise load from env.
-        load_dotenv()
+        env_path = Path(__file__).parent / ".env"
+        load_dotenv(dotenv_path=env_path)
+
         self.api_key = api_key or os.getenv("YOUR_API_KEY")
         if not self.api_key:
             raise ValueError(
