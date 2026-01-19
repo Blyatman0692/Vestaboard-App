@@ -29,7 +29,7 @@ def run():
 
     try:
         weather_data = wc.get_current_weather_multi_cities()
-        logger.info(f"Successfully retrieved weather info: {weather_data}")
+        logger.info(f"Successfully retrieved weather info:\n{weather_data}")
     except Exception as e:
         logger.exception(f"Error retrieving weather info: {e}")
 
@@ -38,7 +38,7 @@ def run():
         message += weather.format_weather_line(now) + "\n"
     try:
         vb.send_message(message)
-        logger.info(f"Message sent: {message}")
+        logger.info(f"Message sent:\n{message}")
     except Exception as e:
         logger.exception(f"Error sending message: {e}")
 
