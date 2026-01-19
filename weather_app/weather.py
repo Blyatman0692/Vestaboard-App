@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, List
 from weather_app.cities import CITY_COORDS
 import requests
 
@@ -90,7 +90,7 @@ class WeatherClient:
         )
 
     def get_current_weather_multi_cities(self):
-        results: Dict[str, WeatherNow] = {}
+        results: List[WeatherNow] = []
 
         for city, (lat, lon) in self.cities_coords.items():
             client = WeatherClient(
@@ -101,7 +101,7 @@ class WeatherClient:
                 wind_unit=self.wind_unit,
                 timeout_s=self.timeout_s,
             )
-            results[city] = client.get_current_weather()
+            results.append(client.get_current_weather())
 
         return results
 
