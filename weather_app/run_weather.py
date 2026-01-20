@@ -1,13 +1,13 @@
 import logging
-import os
-
-import utils
-import weather
 from typing import List
-from dotenv import load_dotenv
 from datetime import date
+
+from dotenv import load_dotenv
+
 from vestaboard import VestaboardMessenger
-from weather_app.weather import WeatherNow
+from .weather import WeatherNow, WeatherClient, format_weather_line
+from . import utils
+from . import cities
 
 LOG_FILE = "/var/log/mycron.log"
 
@@ -28,7 +28,7 @@ def run():
 
     load_dotenv()
 
-    wc = weather.WeatherClient()
+    wc = WeatherClient()
     vb = VestaboardMessenger()
     weather_data = List[WeatherNow]
 
@@ -41,10 +41,11 @@ def run():
     except Exception as e:
         logger.exception(f"Error retrieving weather info: {e}")
 
-    vbml_components = [utils.compose_vbml_component(header_string, justify="center", align="top")]
+    vbml_components = [
+        utils.compose_vbml_component(header_string, justify="center", align="top")]
 
     for now in weather_data:
-        weather_string = "{67}" + weather.format_weather_line(now)
+        weather_string = "{67}" + format_weather_line(now)
         component = utils.compose_vbml_component(weather_string)
         vbml_components.append(component)
 
