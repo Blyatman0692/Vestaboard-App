@@ -7,7 +7,7 @@ import requests
 @dataclass(frozen=True)
 class WeatherNow:
     city: str
-    temperature: int
+    temperature: float
     unit: str
     condition: str
     wind_speed: int
@@ -68,11 +68,12 @@ class WeatherClient:
         resp.raise_for_status()
 
         data: Dict[str, Any] = resp.json()
+        print(data)
         cw = data.get("current_weather")
         if not cw:
             raise RuntimeError(f"Unexpected response: missing 'current_weather': {data}")
 
-        temp = int(round(cw["temperature"]))
+        temp = float(round(cw["temperature"], 1))
         wind = int(round(cw["windspeed"]))
         code = int(cw.get("weathercode", -1))
 
@@ -155,10 +156,10 @@ def format_weather_line(now: WeatherNow) -> str:
     """
 
     TOTAL_WIDTH = 21
-    TEMP_WIDTH = 3  # e.g. "08C", "12C"
+    TEMP_WIDTH = 5  # e.g. 12.4C
 
     # Normalize temperature to 2 digits
-    temp = f"{int(round(now.temperature)):02d}{now.unit}"
+    temp = f"{now.temperature:4.1f}{now.unit}"
 
     city = now.city.upper()
 
