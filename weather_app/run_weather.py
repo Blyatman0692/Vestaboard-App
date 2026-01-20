@@ -5,9 +5,9 @@ from datetime import date
 from dotenv import load_dotenv
 
 from vestaboard import VestaboardMessenger
+from weather_app.weather_header import WeatherHeader
 from .weather import WeatherNow, WeatherClient, format_weather_line
 from . import utils
-from . import cities
 
 LOG_FILE = "/var/log/mycron.log"
 
@@ -19,21 +19,15 @@ logging.basicConfig(
 
 logger = logging.getLogger()
 
-def get_headers():
-    pass
-
-
 def run():
     logger.info("Weather job started")
 
     load_dotenv()
 
     wc = WeatherClient()
+    weather_header = WeatherHeader()
     vb = VestaboardMessenger()
     weather_data = List[WeatherNow]
-
-    header_string = 2 * "{66}" + 2 * "{68}" + date.today().strftime(
-        "%Y-%m-%d") + 2 * "{68}" + 2 * "{66}"
 
     try:
         weather_data = wc.get_current_weather_multi_cities()
@@ -41,8 +35,9 @@ def run():
     except Exception as e:
         logger.exception(f"Error retrieving weather info: {e}")
 
-    vbml_components = [
-        utils.compose_vbml_component(header_string, justify="center", align="top")]
+    vbml_components = []
+    for hc in weather_header.compose_header_components():
+        vbml_components.append(hc)
 
     for now in weather_data:
         weather_string = "{67}" + format_weather_line(now)
@@ -50,7 +45,8 @@ def run():
         vbml_components.append(component)
 
     vbml_payload = utils.compose_vbml_payload(vbml_components)
-    vbml_layout = vb.vbml_compose(vbml_payload)
+    print(vbml_payload)
+    vbml_layout = vb.vbml_compose_layout(vbml_payload)
 
     try:
         vb.send_layout(vbml_layout)
