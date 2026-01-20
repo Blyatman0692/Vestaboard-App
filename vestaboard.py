@@ -79,7 +79,7 @@ class VestaboardMessenger:
     def vbml_format_message(self, message: str) -> List[List]:
         payload = {"message": message}
         resp = requests.post(
-            self.VBML_URL,
+            self.VBML_URL_FORMAT,
             json=payload,
             headers=self.headers,
             timeout=self.timeout_s
@@ -87,7 +87,7 @@ class VestaboardMessenger:
         resp.raise_for_status()
         return resp.json()
 
-    def vbml_compose(self, payload) -> List[List]:
+    def vbml_compose_layout(self, payload) -> List[List]:
         payload = payload
         resp = requests.post(
             self.VBML_URL_COMPOSE,
@@ -97,4 +97,5 @@ class VestaboardMessenger:
         )
         resp.raise_for_status()
         return resp.json()
+
 
