@@ -27,10 +27,10 @@ class VestaboardMessenger:
         env_path = Path(__file__).parent / ".env"
         load_dotenv(dotenv_path=env_path)
 
-        self.api_key = api_key or os.getenv("YOUR_API_KEY")
+        self.api_key = api_key or os.getenv("VB_RW_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "Missing Vestaboard Read/Write key. Set env var YOUR_API_KEY "
+                "Missing Vestaboard Read/Write key. Set env var VB_RW_API_KEY "
                 "or pass api_key=... to VestaboardMessenger()."
             )
 

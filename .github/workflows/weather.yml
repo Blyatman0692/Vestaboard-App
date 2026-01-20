@@ -35,6 +35,6 @@ jobs:
       - name: Run weather script
         if: steps.gate.outputs.run == 'true'
         env:
-          VB_RW_API_KEY = ${{secrets.VB_RW_API_KEY}}
+          VB_RW_API_KEY: ${{secrets.VB_RW_API_KEY}}
         run: |
           python -m weather_app.run_weather
