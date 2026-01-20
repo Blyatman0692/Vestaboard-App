@@ -1,9 +1,10 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from . import utils
 
 class WeatherHeader():
     def __init__(self):
-        self.now = datetime.now()
+        self.now = datetime.now(ZoneInfo("America/Los_Angeles"))
         self.month = self.now.strftime("%b")
         self.day = self.now.day.__str__()
         self.hour = self.now.hour
