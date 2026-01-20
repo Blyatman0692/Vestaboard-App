@@ -146,7 +146,28 @@ class WeatherClient:
 
 def format_weather_line(now: WeatherNow) -> str:
     """
-    Returns a short message suitable for Vestaboard text mode.
-    Example: 'SEATTLE 52F LIGHT RAIN'
+    Returns a fixed-width (21 chars) Vestaboard-friendly line.
+
+    Layout:
+    [CITY................][TEMP]
+    City: left-aligned
+    Temperature: right-aligned, always 2 digits
     """
-    return f"{now.city} {now.temperature}{now.unit} {now.condition}"
+
+    TOTAL_WIDTH = 21
+    TEMP_WIDTH = 3  # e.g. "08C", "12C"
+
+    # Normalize temperature to 2 digits
+    temp = f"{int(round(now.temperature)):02d}{now.unit}"
+
+    city = now.city.upper()
+
+    # Truncate city if too long
+    max_city_len = TOTAL_WIDTH - TEMP_WIDTH
+    city = city[:max_city_len]
+
+    # Build fixed-width line
+    line = f"{city}{' ' * (TOTAL_WIDTH - len(city) - TEMP_WIDTH)}{temp}"
+
+    # Safety trim
+    return line[:TOTAL_WIDTH]
