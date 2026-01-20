@@ -17,14 +17,6 @@ class WeatherNow:
 class WeatherClient:
     """
     Fetches current weather using Open-Meteo (no API key required).
-
-    Env configuration:
-      - WEATHER_LAT (default: 47.67)
-      - WEATHER_LON (default: -122.12)
-      - WEATHER_CITY (default: "SEATTLE")
-      - WEATHER_UNIT ("fahrenheit" or "celsius", default: "fahrenheit")
-      - WEATHER_WIND_UNIT ("mph" or "kmh", default: "mph")
-
     Docs: https://open-meteo.com/
     """
 
@@ -32,20 +24,13 @@ class WeatherClient:
 
     def __init__(
         self,
-        lat: Optional[float] = None,
-        lon: Optional[float] = None,
-        city: Optional[str] = None,
-        temp_unit: Optional[str] = None,   # "fahrenheit" | "celsius"
-        wind_unit: Optional[str] = None,   # "mph" | "kmh"
+        temp_unit: str = "celsius",
+        wind_unit: str = "kmh",
         timeout_s: int = 10,
     ):
-        self.lat = lat if lat is not None else float(os.getenv("WEATHER_LAT", "47.67"))
-        self.lon = lon if lon is not None else float(os.getenv("WEATHER_LON", "-122.12"))
-        self.city = (city if city is not None else os.getenv("WEATHER_CITY", "SEATTLE")).strip().upper()
         self.cities_coords = CITY_COORDS
-
-        self.temp_unit = (temp_unit if temp_unit is not None else os.getenv("WEATHER_UNIT", "fahrenheit")).strip().lower()
-        self.wind_unit = (wind_unit if wind_unit is not None else os.getenv("WEATHER_WIND_UNIT", "mph")).strip().lower()
+        self.temp_unit = temp_unit
+        self.wind_unit = wind_unit
 
         if self.temp_unit not in {"fahrenheit", "celsius"}:
             raise ValueError("WEATHER_UNIT must be 'fahrenheit' or 'celsius'")
@@ -54,13 +39,13 @@ class WeatherClient:
 
         self.timeout_s = timeout_s
 
-    def get_current_weather(self) -> WeatherNow:
+    def get_current_weather(self, lat, lon, city) -> WeatherNow:
         params = {
-            "latitude": self.lat,
-            "longitude": self.lon,
+            "latitude": lat,
+            "longitude": lon,
             "current_weather": "true",
             "temperature_unit": self.temp_unit,
-            "windspeed_unit": "mph" if self.wind_unit == "mph" else "kmh",
+            "windspeed_unit": "kmh" if self.wind_unit == "kmh" else "mph",
             "timezone": "auto",
         }
 
@@ -78,11 +63,11 @@ class WeatherClient:
         code = int(cw.get("weathercode", -1))
 
         condition = self._weathercode_to_text(code)
-        unit = "F" if self.temp_unit == "fahrenheit" else "C"
-        wind_unit = "mph" if self.wind_unit == "mph" else "km/h"
+        unit = "C" if self.temp_unit == "celsius" else "F"
+        wind_unit = "kmh" if self.wind_unit == "kmh" else "mph"
 
         return WeatherNow(
-            city=self.city,
+            city=city,
             temperature=temp,
             unit=unit,
             condition=condition,
@@ -95,14 +80,11 @@ class WeatherClient:
 
         for city, (lat, lon) in self.cities_coords.items():
             client = WeatherClient(
-                lat=lat,
-                lon=lon,
-                city=city,
                 temp_unit=self.temp_unit,
                 wind_unit=self.wind_unit,
                 timeout_s=self.timeout_s,
             )
-            results.append(client.get_current_weather())
+            results.append(client.get_current_weather(lat, lon, city))
 
         return results
 
