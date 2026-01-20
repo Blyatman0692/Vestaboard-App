@@ -1,20 +1,19 @@
 import logging
+import sys
+
 from typing import List
-from datetime import date
-
 from dotenv import load_dotenv
-
 from vestaboard import VestaboardMessenger
 from weather_app.weather_header import WeatherHeader
 from .weather import WeatherNow, WeatherClient, format_weather_line
 from . import utils
 
-LOG_FILE = "/var/log/mycron.log"
-
 logging.basicConfig(
-    filename="/Users/zjw/Desktop/Vestaboard App/weather_cron.log",
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ],
 )
 
 logger = logging.getLogger()
