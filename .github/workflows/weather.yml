@@ -1,7 +1,7 @@
 name: Display Weather Info
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "7 * * * *"
   workflow_dispatch: {}
 
 jobs:
