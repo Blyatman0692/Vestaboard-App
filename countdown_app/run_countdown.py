@@ -1,12 +1,10 @@
 import logging
 import sys
 
-from typing import List
-from dotenv import load_dotenv
 
-from countdown_app.countdown import CountDown
 from vestaboard import VestaboardMessenger
-from targets import TARGET_DATES
+from .countdown import CountDown
+from .targets import TARGET_DATES
 import utils
 
 
