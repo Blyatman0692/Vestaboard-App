@@ -2,7 +2,7 @@ name: Display Countdown Info
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
           MIN_PT=$(TZ=America/Los_Angeles date +%M)
           echo "Pacific time: $HOUR_PT:$MIN_PT"
 
-          if [ "$HOUR_PT" -eq 10 ] && [ "$MIN_PT" -eq 10 ]; then
+          if [ "$HOUR_PT" -eq 10 ] && [ "$MIN_PT" -ge 15 ] && [ "$MIN_PT" -lt 20 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
