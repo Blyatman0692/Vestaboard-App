@@ -29,7 +29,7 @@ jobs:
           MIN_PT=$(TZ=America/Los_Angeles date +%M)
           echo "Pacific time: $HOUR_PT:$MIN_PT"
 
-          if [ "$HOUR_PT" -eq 9 ] && [ "$MIN_PT" -eq 30 ]; then
+          if [ "$HOUR_PT" -eq 10 ] && [ "$MIN_PT" -eq 10 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
