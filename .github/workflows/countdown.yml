@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Gate by Pacific Time (Only 9:30 AM)
+      - name: Gate by Pacific Time (10:15 AM)
         id: gate
         run: |
           HOUR_PT=$(TZ=America/Los_Angeles date +%H)
@@ -40,4 +40,4 @@ jobs:
         env:
           VB_RW_API_KEY: ${{ secrets.VB_RW_API_KEY }}
         run: |
-          python -m weather_app.run_countdown
+          python -m countdown_app.run_countdown
