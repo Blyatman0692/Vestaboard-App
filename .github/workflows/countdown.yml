@@ -22,14 +22,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Gate by Pacific Time (Only 9:00 AM)
+      - name: Gate by Pacific Time (Only 9:30 AM)
         id: gate
         run: |
           HOUR_PT=$(TZ=America/Los_Angeles date +%H)
           MIN_PT=$(TZ=America/Los_Angeles date +%M)
           echo "Pacific time: $HOUR_PT:$MIN_PT"
 
-          if [ "$HOUR_PT" -eq 9 ] && [ "$MIN_PT" -eq 00 ]; then
+          if [ "$HOUR_PT" -eq 9 ] && [ "$MIN_PT" -eq 30 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
