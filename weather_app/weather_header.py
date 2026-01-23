@@ -1,6 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from . import utils
+import utils
+
 
 class WeatherHeader():
     def __init__(self):

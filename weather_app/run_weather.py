@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from vestaboard import VestaboardMessenger
 from weather_app.weather_header import WeatherHeader
 from .weather import WeatherNow, WeatherClient, format_weather_line
-from . import utils
+import utils
 
 logging.basicConfig(
     level=logging.INFO,
