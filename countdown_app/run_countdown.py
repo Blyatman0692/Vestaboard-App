@@ -29,7 +29,7 @@ def run():
         utils.compose_vbml_component(
             "time until",
             height=1,
-            width=22,
+            width=11,
             justify="left",
             align="top"
         )
@@ -37,10 +37,20 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            "{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}{63}",
+            "days",
+            height=1,
+            width=11,
+            justify="right",
+            align="top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "{63}{64}{65}{66}{67}{68}{63}{64}{65}{66}{67}{68}{63}{64}{65}{66}{67}{68}",
             height=1,
             width=22,
-            justify="left",
+            justify="center",
             align="top"
         )
     )
@@ -49,17 +59,17 @@ def run():
     for description, result in results.items():
         description_component = utils.compose_vbml_component(
             description,
-            height=2,
-            width=11,
+            height=1,
+            width=16,
             justify="left",
             align="top"
         )
         vbml_components.append(description_component)
 
         timedelta_component = utils.compose_vbml_component(
-            str(CountDown.breakdown(result.delta)["days"]) + " days",
-            height=2,
-            width=11,
+            str(CountDown.breakdown(result.delta)["days"]),
+            height=1,
+            width=6,
             justify="right",
             align="top"
         )
