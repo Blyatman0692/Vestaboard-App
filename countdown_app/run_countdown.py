@@ -30,9 +30,9 @@ def run():
 
     # Time gate: only run between 09:00–10:00 Pacific Time
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
-    if not (9 <= now_pt.hour <= 10):
+    if not (now_pt.hour == 9 and 15 <= now_pt.minute <= 17):
         logger.info(
-            "Outside allowed PT window (09-10). Current PT time: %s. Skipping run.",
+            "Outside allowed PT window (09:15-09:17). Current PT time: %s. Skipping run.",
             now_pt.strftime("%Y-%m-%d %H:%M:%S")
         )
         return
