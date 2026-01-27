@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 from countdown_app.countdown import CountDown
 from countdown_app.targets import TARGET_DATES
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import utils
 from vestaboard import VestaboardMessenger
 
@@ -24,6 +27,15 @@ def run():
     load_dotenv(override=False)
 
     logger.info("Countdown job started")
+
+    # Time gate: only run between 09:00–10:00 Pacific Time
+    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+    if not (9 <= now_pt.hour <= 10):
+        logger.info(
+            "Outside allowed PT window (09-10). Current PT time: %s. Skipping run.",
+            now_pt.strftime("%Y-%m-%d %H:%M:%S")
+        )
+        return
 
     vb = VestaboardMessenger()
     ct = CountDown(TARGET_DATES)
