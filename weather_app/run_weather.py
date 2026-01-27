@@ -5,6 +5,9 @@ from typing import List
 
 from dotenv import load_dotenv
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from weather_app.weather_header import WeatherHeader
 from weather_app.weather import WeatherNow, WeatherClient, format_weather_line
 
@@ -24,9 +27,16 @@ logger = logging.getLogger(__name__)
 def run():
     logger.info("Weather job started")
 
-    # Local dev uses a .env file; Railway uses the service "Variables" UI.
-    # load_dotenv() is safe in production (it becomes a no-op if no .env exists).
     load_dotenv(override=False)
+
+    # Time gate: only run between 08:00–23:00 Pacific Time
+    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+    if not (8 <= now_pt.hour <= 23):
+        logger.info(
+            "Outside allowed PT window (08–23). Current PT time: %s. Skipping run.",
+            now_pt.strftime("%Y-%m-%d %H:%M:%S")
+        )
+        return
 
     wc = WeatherClient()
     weather_header = WeatherHeader()
