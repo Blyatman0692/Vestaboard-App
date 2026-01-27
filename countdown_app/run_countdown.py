@@ -1,11 +1,13 @@
 import logging
 import sys
 
+from dotenv import load_dotenv
 
-from vestaboard import VestaboardMessenger
-from .countdown import CountDown
-from .targets import TARGET_DATES
+from countdown_app.countdown import CountDown
+from countdown_app.targets import TARGET_DATES
+
 import utils
+from vestaboard import VestaboardMessenger
 
 
 logging.basicConfig(
@@ -16,12 +18,26 @@ logging.basicConfig(
     ],
 )
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 def run():
+    load_dotenv(override=False)
+
+    logger.info("Countdown job started")
+
     vb = VestaboardMessenger()
     ct = CountDown(TARGET_DATES)
-    results = ct.calculate_date_delta()
+
+    try:
+        results = ct.calculate_date_delta()
+        logger.info("Successfully calculated countdowns (%d targets)", len(results))
+    except Exception:
+        logger.exception("Error calculating countdowns")
+        raise
+
+    if not results:
+        logger.warning("No countdown results returned; skipping message send.")
+        return
 
     vbml_components = []
 
@@ -76,9 +92,16 @@ def run():
         vbml_components.append(timedelta_component)
 
     vbml_payload = utils.compose_vbml_payload(vbml_components)
-    print(vbml_payload)
+    logger.debug("VBML payload prepared")
+
     vbml_layout = vb.vbml_compose_layout(vbml_payload)
-    vb.send_layout(vbml_layout)
+
+    try:
+        vb.send_layout(vbml_layout)
+        logger.info("Countdown message sent successfully")
+    except Exception:
+        logger.exception("Error sending countdown message")
+        raise
 
 if __name__ == "__main__":
     run()

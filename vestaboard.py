@@ -1,15 +1,12 @@
-from http.client import responses
-from dotenv import load_dotenv
 import os
 from typing import Any, Dict, Optional, List
-from pathlib import Path
 import requests
 
 
 class VestaboardMessenger:
     """Small helper for interacting with the Vestaboard Read/Write API.
 
-    Expects the environment variable `VESTABOARD_RW_KEY` to be set.
+    Expects the environment variable `VB_RW_API_KEY` to be set.
 
     API docs:
       - GET  https://rw.vestaboard.com/   -> returns current message
@@ -24,9 +21,6 @@ class VestaboardMessenger:
     HEADER_NAME = "X-Vestaboard-Read-Write-Key"
 
     def __init__(self, api_key: Optional[str] = None, timeout_s: int = 10):
-        env_path = Path(__file__).parent / ".env"
-        load_dotenv(dotenv_path=env_path)
-
         self.api_key = api_key or os.getenv("VB_RW_API_KEY")
         if not self.api_key:
             raise ValueError(
