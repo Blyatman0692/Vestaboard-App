@@ -5,13 +5,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, PlainTextResponse
 import httpx
 from urllib.parse import urlencode
-
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
 SONOS_CLIENT_ID = os.environ["SONOS_CLIENT_ID"]
 SONOS_CLIENT_SECRET = os.environ["SONOS_CLIENT_SECRET"]
-
+SONOS_CONTROL_BASE = "https://api.ws.sonos.com/control/api/v1"
 PENDING_STATES: set[str] = set()
 
 @app.get("/health")
@@ -75,3 +75,23 @@ async def oauth_callback(code: str | None = None, state: str | None = None):
     print("SONOS TOKENS:", tokens)
 
     return PlainTextResponse("Success! You can close this tab.")
+
+@app.get("/sonos/households")
+async def sonos_households():
+    """
+    Smoke test: prove Bearer auth works by calling Sonos Control API getHouseholds.
+    Doc: GET https://api.ws.sonos.com/control/api/v1/households
+    """
+
+    access_token = os.environ["SONOS_ACCESS_TOKEN"]
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    url = f"{SONOS_CONTROL_BASE}/households"
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(url, headers=headers)
+
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
