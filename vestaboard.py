@@ -94,7 +94,7 @@ class VestaboardMessenger:
 
                 return resp.json()
 
-            except (requests.Timeout, requests.ConnectionError, requests.ChunkedEncodingError) as e:
+            except (requests.Timeout, requests.ConnectionError) as e:
                 last_err = e
                 if attempt >= self.retry_attempts:
                     break
