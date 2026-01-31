@@ -4,6 +4,8 @@ import secrets
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, PlainTextResponse
 import httpx
+from urllib.parse import urlencode
+
 
 app = FastAPI()
 
@@ -24,14 +26,16 @@ def oauth_start():
     # IMPORTANT: redirect_uri must exactly match what you register in Sonos portal
     redirect_uri = os.environ["SONOS_REDIRECT_URI"]
 
-    auth_url = (
-        "https://api.sonos.com/login/v3/oauth"
-        f"?client_id={SONOS_CLIENT_ID}"
-        "&response_type=code"
-        f"&redirect_uri={redirect_uri}"
-        "&scope=playback-control-all"
-        f"&state={state}"
-    )
+    params = {
+        "client_id": SONOS_CLIENT_ID,
+        "response_type": "code",
+        "state": state,
+        "scope": "playback-control-all",
+        "redirect_uri": redirect_uri,
+    }
+
+    auth_url = "https://api.sonos.com/login/v3/oauth?" + urlencode(params)
+
     print("SONOS AUTH URL:", auth_url)
     return RedirectResponse(auth_url)
 
