@@ -1,8 +1,12 @@
 import os
+import time
+import random
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
-from weather_app.cities import CITY_COORDS
+from typing import Dict, Any, List
+
 import requests
+
+from weather_app.cities import CITY_COORDS
 
 @dataclass(frozen=True)
 class WeatherNow:
@@ -27,6 +31,10 @@ class WeatherClient:
         temp_unit: str = "celsius",
         wind_unit: str = "kmh",
         timeout_s: int = 10,
+        retry_attempts: int = 5,
+        retry_base_delay_s: float = 0.8,
+        retry_max_delay_s: float = 10.0,
+        session: requests.Session | None = None,
     ):
         self.cities_coords = CITY_COORDS
         self.temp_unit = temp_unit
@@ -38,8 +46,23 @@ class WeatherClient:
             raise ValueError("WEATHER_WIND_UNIT must be 'mph' or 'kmh'")
 
         self.timeout_s = timeout_s
+        self.retry_attempts = retry_attempts
+        self.retry_base_delay_s = retry_base_delay_s
+        self.retry_max_delay_s = retry_max_delay_s
+        self._session = session or requests.Session()
 
-    def get_current_weather(self, lat, lon, city) -> WeatherNow:
+    @staticmethod
+    def _is_retryable_status(status_code: int) -> bool:
+        # Transient server-side or throttling
+        return status_code in {429, 500, 502, 503, 504}
+
+    def _sleep_backoff(self, attempt: int) -> None:
+        # Exponential backoff + small jitter
+        backoff = min(self.retry_max_delay_s, self.retry_base_delay_s * (2 ** (attempt - 1)))
+        jitter = random.uniform(0.0, 0.5)
+        time.sleep(backoff + jitter)
+
+    def get_current_weather(self, lat: float, lon: float, city: str) -> WeatherNow:
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -49,42 +72,68 @@ class WeatherClient:
             "timezone": "auto",
         }
 
-        resp = requests.get(self.BASE_URL, params=params, timeout=self.timeout_s)
-        resp.raise_for_status()
+        last_err: Exception | None = None
 
-        data: Dict[str, Any] = resp.json()
-        print(data)
-        cw = data.get("current_weather")
-        if not cw:
-            raise RuntimeError(f"Unexpected response: missing 'current_weather': {data}")
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                resp = self._session.get(self.BASE_URL, params=params, timeout=self.timeout_s)
 
-        temp = float(round(cw["temperature"], 1))
-        wind = int(round(cw["windspeed"]))
-        code = int(cw.get("weathercode", -1))
+                # Retry only on transient HTTP status codes
+                if resp.status_code >= 400:
+                    if self._is_retryable_status(resp.status_code) and attempt < self.retry_attempts:
+                        self._sleep_backoff(attempt)
+                        continue
+                    resp.raise_for_status()
 
-        condition = self._weathercode_to_text(code)
-        unit = "C" if self.temp_unit == "celsius" else "F"
-        wind_unit = "kmh" if self.wind_unit == "kmh" else "mph"
+                data: Dict[str, Any] = resp.json()
+                cw = data.get("current_weather")
+                if not cw:
+                    raise RuntimeError(f"Unexpected response: missing 'current_weather': {data}")
 
-        return WeatherNow(
-            city=city,
-            temperature=temp,
-            unit=unit,
-            condition=condition,
-            wind_speed=wind,
-            wind_unit=wind_unit,
-        )
+                temp = float(round(cw["temperature"], 1))
+                wind = int(round(cw["windspeed"]))
+                code = int(cw.get("weathercode", -1))
 
-    def get_current_weather_multi_cities(self):
+                condition = self._weathercode_to_text(code)
+                unit = "C" if self.temp_unit == "celsius" else "F"
+                wind_unit = "kmh" if self.wind_unit == "kmh" else "mph"
+
+                return WeatherNow(
+                    city=city,
+                    temperature=temp,
+                    unit=unit,
+                    condition=condition,
+                    wind_speed=wind,
+                    wind_unit=wind_unit,
+                )
+
+            except (requests.Timeout, requests.ConnectionError, requests.ChunkedEncodingError) as e:
+                # Network/transient failures
+                last_err = e
+                if attempt >= self.retry_attempts:
+                    break
+                self._sleep_backoff(attempt)
+
+            except requests.HTTPError as e:
+                # Non-retryable HTTP errors or retryable exhausted
+                last_err = e
+                break
+
+            except ValueError as e:
+                # JSON decode errors are usually transient/partial responses; retry a few times
+                last_err = e
+                if attempt >= self.retry_attempts:
+                    break
+                self._sleep_backoff(attempt)
+
+        assert last_err is not None
+        raise last_err
+
+    def get_current_weather_multi_cities(self) -> List[WeatherNow]:
         results: List[WeatherNow] = []
 
         for city, (lat, lon) in self.cities_coords.items():
-            client = WeatherClient(
-                temp_unit=self.temp_unit,
-                wind_unit=self.wind_unit,
-                timeout_s=self.timeout_s,
-            )
-            results.append(client.get_current_weather(lat, lon, city))
+            results.append(self.get_current_weather(lat, lon, city))
 
         return results
 
