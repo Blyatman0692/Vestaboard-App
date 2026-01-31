@@ -32,6 +32,7 @@ def oauth_start():
         "&scope=playback-control-all"
         f"&state={state}"
     )
+    print("SONOS AUTH URL:", auth_url)
     return RedirectResponse(auth_url)
 
 @app.get("/oauth/callback")
