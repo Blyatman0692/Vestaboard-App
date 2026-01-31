@@ -28,13 +28,8 @@ def run():
 
     logger.info("Countdown job started")
 
-    # Time gate: only run between 09:00–10:00 Pacific Time
-    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
-    if not (now_pt.hour == 9 and 15 <= now_pt.minute <= 17):
-        logger.info(
-            "Outside allowed PT window (09:15-09:17). Current PT time: %s. Skipping run.",
-            now_pt.strftime("%Y-%m-%d %H:%M:%S")
-        )
+    # Time gate: only run between 09:15–09:17 Pacific Time
+    if not utils.time_gate(logger, 9, 15, 9, 17):
         return
 
     vb = VestaboardMessenger()

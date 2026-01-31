@@ -30,12 +30,7 @@ def run():
     load_dotenv(override=False)
 
     # Time gate: only run between 08:00–23:00 Pacific Time
-    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
-    if not (8 <= now_pt.hour <= 23):
-        logger.info(
-            "Outside allowed PT window (08–23). Current PT time: %s. Skipping run.",
-            now_pt.strftime("%Y-%m-%d %H:%M:%S")
-        )
+    if not utils.time_gate(logger, 8, 0, 23, 0):
         return
 
     wc = WeatherClient()
