@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from retry_requests import retry
-
+from datetime import datetime, timezone
 import requests
 import openmeteo_requests
 import requests_cache
@@ -16,9 +16,20 @@ class WeatherNow:
     city: str
     temperature: float
     unit: str
-    condition: str
     wind_speed: int
     wind_unit: str
+
+@dataclass(frozen=True)
+class DetailedWeather:
+    city: str
+    temp_now: float
+    temp_max: float
+    temp_min: float
+    feels_like: float
+    uv_idx: float
+    rain_chance_today: float
+    condition: str
+    unit: str
 
 
 class WeatherClient:
@@ -69,7 +80,66 @@ class WeatherClient:
         jitter = random.uniform(0.0, 0.5)
         time.sleep(backoff + jitter)
 
-    def get_current_weather(self) -> list[WeatherNow]:
+    def get_detailed_weather(self, city: str, lat, lon) -> DetailedWeather:
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": [
+                "temperature_2m",
+                "apparent_temperature",
+                "weather_code",
+            ],
+            "hourly": [
+                "precipitation_probability",
+            ],
+            "daily": [
+                "temperature_2m_max",
+                "temperature_2m_min",
+                "uv_index_max",
+                "sunset",
+            ],
+            "temperature_unit": self.temp_unit,
+            "windspeed_unit": self.wind_unit,
+            "timezone": "auto",
+        }
+
+        responses = self.client.weather_api(self.BASE_URL, params=params)
+        response = responses[0]
+
+        # -------- Current --------
+        current = response.Current()
+        temperature = current.Variables(0).Value()
+        feels_like = current.Variables(1).Value()
+        weather_code = int(current.Variables(2).Value())
+
+        # -------- Daily --------
+        daily = response.Daily()
+        high = float(daily.Variables(0).ValuesAsNumpy()[0])
+        low = float(daily.Variables(1).ValuesAsNumpy()[0])
+        uv_index = float(daily.Variables(2).ValuesAsNumpy()[0])
+
+        # -------- Rain chance (derived) --------
+        hourly = response.Hourly()
+        rain_probs = hourly.Variables(0).ValuesAsNumpy()
+
+        rain_chance_today = float(rain_probs[:24].max())
+
+        detailed = DetailedWeather(
+            city=city,
+            temp_now=temperature,
+            temp_max=high,
+            temp_min=low,
+            feels_like=feels_like,
+            uv_idx=uv_index,
+            rain_chance_today=rain_chance_today,
+            condition=self._weathercode_to_text(weather_code),
+            unit="C" if self.temp_unit == "celsius" else "F"
+        )
+
+        return detailed
+
+
+    def get_current_weather_multi_cities(self) -> list[WeatherNow]:
         results: List[WeatherNow] = []
 
         for city, (lat, lon) in self.cities_coords.items():
@@ -100,13 +170,11 @@ class WeatherClient:
         weather_code = int(current.Variables(2).Value())
 
         unit = "C" if self.temp_unit == "celsius" else "F"
-        condition = self._weathercode_to_text(weather_code)
 
         return WeatherNow(
             city=city,
             temperature=temperature,
             unit=unit,
-            condition=condition,
             wind_speed=wind_speed,
             wind_unit=self.wind_unit,
         )

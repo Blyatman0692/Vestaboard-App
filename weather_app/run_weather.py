@@ -5,9 +5,6 @@ from typing import List
 
 from dotenv import load_dotenv
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 from weather_app.weather_header import WeatherHeader
 from weather_app.weather import WeatherNow, WeatherClient, format_weather_line
 
@@ -40,7 +37,7 @@ def run():
     weather_data: List[WeatherNow] = []
 
     try:
-        weather_data = wc.get_current_weather()
+        weather_data = wc.get_current_weather_multi_cities()
         logger.info("Successfully retrieved weather info (%d cities)", len(weather_data))
     except Exception:
         logger.exception("Error retrieving weather info")
