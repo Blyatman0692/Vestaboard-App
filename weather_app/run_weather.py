@@ -40,7 +40,7 @@ def run():
     weather_data: List[WeatherNow] = []
 
     try:
-        weather_data = wc.get_current_weather_multi_cities()
+        weather_data = wc.get_current_weather()
         logger.info("Successfully retrieved weather info (%d cities)", len(weather_data))
     except Exception:
         logger.exception("Error retrieving weather info")
