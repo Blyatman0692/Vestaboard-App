@@ -84,7 +84,17 @@ def run():
             justify="left",
             align="top",
             height=1,
-            width=11
+            width=5
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "",
+            justify="left",
+            align="top",
+            height=1,
+            width=2
         )
     )
 
@@ -94,7 +104,7 @@ def run():
             justify="right",
             align="top",
             height=1,
-            width=11
+            width=15
         )
     )
 
