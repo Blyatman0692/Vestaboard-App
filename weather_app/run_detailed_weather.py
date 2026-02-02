@@ -21,27 +21,37 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def format_string(label: str, value: float, unit: Optional[str] = None) -> str:
+def format_string(
+    label: str,
+    value: float,
+    unit: Optional[str] = None,
+    precision: Optional[int] = None,
+) -> str:
     """
     Fixed-width 10 chars:
-    - label column: 5 chars (fits 'LIKE:')
-    - value column: 5 chars (right-aligned)
+
+    precision:
+      None  -> default 1 decimal
+      0     -> integer (100.0 -> 100)
+      N     -> N decimals
     """
     total_width = 10
     label_width = 5
     value_width = total_width - label_width
 
-    # Ensure label fits exactly in label column
     label_fixed = f"{label:<{label_width}}"[:label_width]
 
-    # 1-decimal value
-    rounded = round(float(value), 1)
-    value_core = f"{rounded:.1f}"
+    p = 1 if precision is None else precision
 
-    # Append unit only if provided
+    rounded = round(float(value), p)
+
+    if p == 0:
+        value_core = f"{int(rounded)}"
+    else:
+        value_core = f"{rounded:.{p}f}"
+
     value_str = f"{value_core}{unit}" if unit else value_core
 
-    # Right-align value in its column (truncate from left if somehow too long)
     if len(value_str) > value_width:
         value_str = value_str[-value_width:]
 
@@ -120,7 +130,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("RAIN:", detailed.rain_chance_today, "%"),
+            format_string("RAIN:", detailed.rain_chance_today, "%", 0),
             justify="right",
             align="top",
             height=1,
@@ -159,8 +169,6 @@ def run():
     except Exception:
         logger.exception("Error sending message")
         raise
-
-    print(detailed)
 
 if __name__ == "__main__":
     run()
