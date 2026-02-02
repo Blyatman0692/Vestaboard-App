@@ -26,8 +26,8 @@ def run():
 
     load_dotenv(override=False)
 
-    # Time gate: only run between 08:00–23:00 Pacific Time
-    if not utils.time_gate(logger, 8, 0, 23, 0):
+    # Time gate: only run between 09:00–23:00 Pacific Time
+    if not utils.time_gate(logger, 9, 0, 23, 0):
         return
 
     wc = WeatherClient()
