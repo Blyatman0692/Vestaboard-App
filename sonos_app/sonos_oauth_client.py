@@ -9,6 +9,12 @@ SONOS_AUTH_BASE_URL = "https://api.sonos.com/login/v3/oauth?"
 class SonosAuthError(Exception):
     """base error"""
 
+class SonosAuthTokenExchangeError(SonosAuthError):
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
 
 class SonosOAuthClient:
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str):
@@ -59,6 +65,6 @@ class SonosOAuthClient:
             )
 
         if resp.status_code != 200:
-            raise SonosAuthError("Token exchange failure")
+            raise SonosAuthTokenExchangeError("Token exchange failure", resp.status_code)
 
         return resp.json()
