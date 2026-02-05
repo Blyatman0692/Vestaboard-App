@@ -1,4 +1,5 @@
 import psycopg
+from sonos_app.token import SonosToken
 
 class PostgresDataStore:
     def __init__(self, db_url, user_key):
@@ -28,3 +29,32 @@ class PostgresDataStore:
                     )
                 )
                 conn.commit()
+
+    def load_tokens(self):
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select access_token,
+                           refresh_token,
+                           expires_in,
+                           scope,
+                           updated_at
+                    from sonos_tokens
+                    where user_key = %s
+                    """,
+                    self.user_key,
+                )
+                row = cur.fetchone()
+
+        if not row:
+            return None
+
+        access_token, refresh_token, expires_in, scope, updated_at = row
+        return SonosToken(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=expires_in,
+            scope=scope,
+            updated_at=updated_at.isoformat() if updated_at else None
+        )

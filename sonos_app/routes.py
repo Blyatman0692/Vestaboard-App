@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse, PlainTextResponse
 import httpx
 from urllib.parse import urlencode
 from fastapi.responses import JSONResponse
+from watchfiles import awatch
 
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.sonos_client import SonosToken, SonosClient
@@ -50,6 +51,8 @@ async def oauth_callback(code: str, state: str):
 
 @app.get("/sonos/households")
 async def sonos_households():
-    client = SonosClient(SonosToken(os.getenv("SONOS_ACCESS_TOKEN")))
-    data = await client.get_households()
-    return data
+    tokens = db_client.load_tokens()
+
+    client = SonosClient(tokens)
+
+    return await client.get_households()
