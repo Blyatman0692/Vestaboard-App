@@ -62,6 +62,7 @@ async def sonos_groups():
     tokens = db_client.load_tokens()
     client = SonosClient(tokens)
 
-    household_id = await client.get_households()["households"][0]["id"]
+    households = await client.get_households()
+    household_id = households["households"][0]["id"]
 
     return await client.get_groups(household_id)
