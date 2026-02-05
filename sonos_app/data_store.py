@@ -43,7 +43,7 @@ class PostgresDataStore:
                     from sonos_tokens
                     where user_key = %s
                     """,
-                    self.user_key,
+                    (self.user_key),
                 )
                 row = cur.fetchone()
 
