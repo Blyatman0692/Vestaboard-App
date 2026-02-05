@@ -3,22 +3,22 @@ import base64
 from dataclasses import dataclass
 import httpx
 
+from sonos_app.token import SonosToken
+
 CONTROL_API_BASE_URL = "https://api.ws.sonos.com/control/api/v1"
 SONOS_OAUTH_TOKEN_URL = "https://api.sonos.com/login/v3/oauth/access"
 
-@dataclass
-class SonosToken:
-    access_token: str
-    refresh_token: str | None = None
-
-
 class SonosClient:
-
     def __init__(self, tokens: SonosToken):
         self.tokens = tokens
 
     async def get_households(self) -> dict:
         url = f"{CONTROL_API_BASE_URL}/households"
+        return await self._get_json(url)
+
+    async def get_groups(self, householdId: str):
+        url = f"{CONTROL_API_BASE_URL}/households/{householdId}/groups"
+
         return await self._get_json(url)
 
     async def _get_json(self, url: str) -> dict:
@@ -30,3 +30,5 @@ class SonosClient:
             raise RuntimeError(f"Sonos API error {resp.status_code}: {resp.text}")
 
         return resp.json()
+
+

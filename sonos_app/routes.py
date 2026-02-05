@@ -47,7 +47,7 @@ async def oauth_callback(code: str, state: str):
 
     db_client.save_tokens(tokens)
 
-    return PlainTextResponse("Authorization success. Close this tab.")
+    return PlainTextResponse("Authorization successful. Close this tab.")
 
 @app.get("/sonos/households")
 async def sonos_households():
@@ -56,3 +56,11 @@ async def sonos_households():
     client = SonosClient(tokens)
 
     return await client.get_households()
+
+@app.get("/sonos/groups")
+async def sonos_groups():
+    tokens = db_client.load_tokens()
+
+    client = SonosClient(tokens)
+
+    return await client.get_groups()
