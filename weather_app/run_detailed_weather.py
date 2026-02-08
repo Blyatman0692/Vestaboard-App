@@ -110,7 +110,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("NOW:", detailed.temp_now, detailed.unit),
+            format_string("NOW ", detailed.temp_now, detailed.unit),
             justify="left",
             align="top",
             height=1,
@@ -120,7 +120,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("UVI:", detailed.uv_idx),
+            format_string("UVI ", detailed.uv_idx),
             justify="right",
             align="top",
             height=1,
@@ -130,7 +130,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("MAX:", detailed.temp_max, detailed.unit),
+            format_string("LIKE ", detailed.feels_like, detailed.unit),
             justify="left",
             align="top",
             height=1,
@@ -140,7 +140,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("RAIN:", detailed.rain_chance_today, "%", 0),
+            format_string("RAIN ", detailed.rain_chance_today, "%", 0),
             justify="right",
             align="top",
             height=1,
@@ -148,10 +148,9 @@ def run():
         )
     )
 
-
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("MIN:", detailed.temp_min, detailed.unit),
+            format_string("MAX ", detailed.temp_max, detailed.unit),
             justify="left",
             align="top",
             height=1,
@@ -161,7 +160,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("LIKE:", detailed.feels_like, detailed.unit),
+            format_string("MIN ", detailed.temp_min, detailed.unit),
             justify="left",
             align="top",
             height=1,
