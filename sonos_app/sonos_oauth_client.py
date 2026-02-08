@@ -68,3 +68,31 @@ class SonosOAuthClient:
             raise SonosAuthTokenExchangeError("Token exchange failure", resp.status_code)
 
         return resp.json()
+
+    async def refresh_token(self, refresh_token: str):
+        basic = base64.b64encode(
+            f"{self.client_id}:{self.client_secret}".encode()).decode()
+        headers = {
+            "Authorization": f"Basic {basic}",
+            "Accept": "application/json",
+        }
+
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.sonos.com/login/v3/oauth/access",
+                headers=headers,
+                data=data,
+            )
+
+        if resp.status_code != 200:
+            raise SonosAuthError(f"Refresh failed: {resp.status_code}")
+
+        return resp.json()
+
+
+
