@@ -1,10 +1,10 @@
 import base64
 import secrets
 from urllib.parse import urlencode
-
+from sonos_app.config import SONOS_OAUTH_BASE_URL, SONOS_OAUTH_TOKEN_URL
 import httpx
 
-SONOS_AUTH_BASE_URL = "https://api.sonos.com/login/v3/oauth?"
+
 
 class SonosAuthError(Exception):
     """base error"""
@@ -22,7 +22,7 @@ class SonosOAuthClient:
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
         self.pending_states: set[str] = set()
-        self.auth_base_url = SONOS_AUTH_BASE_URL
+        self.auth_base_url = SONOS_OAUTH_BASE_URL
 
     def get_oauth_url(self) -> str:
         state = secrets.token_urlsafe(24)
@@ -84,7 +84,7 @@ class SonosOAuthClient:
 
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
-                "https://api.sonos.com/login/v3/oauth/access",
+                SONOS_OAUTH_TOKEN_URL,
                 headers=headers,
                 data=data,
             )

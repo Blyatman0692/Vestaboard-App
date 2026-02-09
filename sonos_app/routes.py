@@ -8,16 +8,15 @@ from urllib.parse import urlencode
 from fastapi.responses import JSONResponse
 from watchfiles import awatch
 
+from sonos_app.config import SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, DB_URL, \
+    SONOS_REDIRECT_URI
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.sonos_client import SonosToken, SonosClient
 from sonos_app.sonos_oauth_client import SonosOAuthClient
 
 app = FastAPI()
 
-SONOS_CLIENT_ID = os.environ["SONOS_CLIENT_ID"]
-SONOS_CLIENT_SECRET = os.environ["SONOS_CLIENT_SECRET"]
-SONOS_REDIRECT_URI = os.environ["SONOS_REDIRECT_URI"]
-DB_URL = os.environ["DATABASE_URL"]
+
 PENDING_STATES: set[str] = set()
 
 # global oauth client to store state
@@ -53,14 +52,14 @@ async def oauth_callback(code: str, state: str):
 async def sonos_households():
     tokens = db_client.load_tokens()
 
-    client = SonosClient(tokens)
+    client = SonosClient(tokens, db_client, oauth_client)
 
     return await client.get_households()
 
 @app.get("/sonos/groups")
 async def sonos_groups():
     tokens = db_client.load_tokens()
-    client = SonosClient(tokens)
+    client = SonosClient(tokens, db_client, oauth_client)
 
     households = await client.get_households()
     household_id = households["households"][0]["id"]
