@@ -58,3 +58,35 @@ class PostgresDataStore:
             scope=scope,
             updated_at=updated_at.isoformat() if updated_at else None
         )
+
+    def save_oauth_state(self, state: str):
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into oauth_states (state, created_at)
+                    values (%s, now())
+                    on conflict (state) do nothing
+                    """,
+                    (state,),
+                )
+                conn.commit()
+
+    def consume_oauth_state(self, state: str) -> bool:
+        """
+        Return True if state existed and was deleted, False otherwise.
+        """
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    delete from oauth_states
+                    where state = %s
+                    returning state
+                    """,
+                    (state,),
+                )
+                row = cur.fetchone()
+                conn.commit()
+
+        return row is not None

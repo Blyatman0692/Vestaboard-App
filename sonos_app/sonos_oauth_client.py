@@ -1,9 +1,12 @@
 import base64
 import secrets
 from urllib.parse import urlencode
-from sonos_app.config import SONOS_OAUTH_BASE_URL, SONOS_OAUTH_TOKEN_URL
+from sonos_app.config import SONOS_OAUTH_BASE_URL, SONOS_OAUTH_TOKEN_URL, \
+    DB_URL, SONOS_CLIENT_ID
 import httpx
 import logging
+
+from sonos_app.data_store import PostgresDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +26,16 @@ class SonosOAuthClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
-        self.pending_states: set[str] = set()
         self.auth_base_url = SONOS_OAUTH_BASE_URL
+        self.db_client = PostgresDataStore(DB_URL, SONOS_CLIENT_ID)
 
     def get_oauth_url(self) -> str:
         state = secrets.token_urlsafe(24)
-        self.pending_states.add(state)
+        self.db_client.save_oauth_state(state)
 
         logger.info(
-            "[OAUTH START] Generated state=%s | pending_states=%s",
+            "[OAUTH START] Generated state=%s",
             state,
-            list(self.pending_states),
         )
 
         params = {
@@ -51,15 +53,12 @@ class SonosOAuthClient:
         if not code or not state:
             raise SonosAuthError("Missing code or state")
 
-        if state not in self.pending_states:
+        if not self.db_client.consume_oauth_state(state):
             logger.error(
-                "[OAUTH CLIENT] STATE MISMATCH! received=%s pending=%s",
+                "[OAUTH CLIENT] STATE MISMATCH! received=%s",
                 state,
-                list(self.pending_states),
             )
             raise SonosAuthError("State does not match")
-
-        self.pending_states.remove(state)
 
         basic = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
 
@@ -72,7 +71,7 @@ class SonosOAuthClient:
 
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
-                "https://api.sonos.com/login/v3/oauth/access",
+                SONOS_OAUTH_TOKEN_URL,
                 headers=headers,
                 data=data,
             )
