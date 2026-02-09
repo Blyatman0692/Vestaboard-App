@@ -51,9 +51,8 @@ def oauth_start():
 @app.get("/oauth/callback")
 async def oauth_callback(code: str, state: str):
     logger.info(
-        "[OAUTH CALLBACK] Received state=%s | pending_states=%s",
+        "[OAUTH CALLBACK] Received state=%s",
         state,
-        list(oauth_client.pending_states),
     )
     tokens = await oauth_client.oauth_callback(code, state)
 
