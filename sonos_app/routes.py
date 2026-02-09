@@ -14,6 +14,14 @@ from sonos_app.data_store import PostgresDataStore
 from sonos_app.sonos_client import SonosToken, SonosClient
 from sonos_app.sonos_oauth_client import SonosOAuthClient
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 app = FastAPI()
 
 
@@ -42,6 +50,11 @@ def oauth_start():
 
 @app.get("/oauth/callback")
 async def oauth_callback(code: str, state: str):
+    logger.info(
+        "[OAUTH CALLBACK] Received state=%s | pending_states=%s",
+        state,
+        list(oauth_client.pending_states),
+    )
     tokens = await oauth_client.oauth_callback(code, state)
 
     db_client.save_tokens(tokens)

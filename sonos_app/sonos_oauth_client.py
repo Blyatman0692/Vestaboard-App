@@ -3,7 +3,9 @@ import secrets
 from urllib.parse import urlencode
 from sonos_app.config import SONOS_OAUTH_BASE_URL, SONOS_OAUTH_TOKEN_URL
 import httpx
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 class SonosAuthError(Exception):
@@ -28,6 +30,12 @@ class SonosOAuthClient:
         state = secrets.token_urlsafe(24)
         self.pending_states.add(state)
 
+        logger.info(
+            "[OAUTH START] Generated state=%s | pending_states=%s",
+            state,
+            list(self.pending_states),
+        )
+
         params = {
             "client_id": self.client_id,
             "response_type": "code",
@@ -44,6 +52,11 @@ class SonosOAuthClient:
             raise SonosAuthError("Missing code or state")
 
         if state not in self.pending_states:
+            logger.error(
+                "[OAUTH CLIENT] STATE MISMATCH! received=%s pending=%s",
+                state,
+                list(self.pending_states),
+            )
             raise SonosAuthError("State does not match")
 
         self.pending_states.remove(state)
