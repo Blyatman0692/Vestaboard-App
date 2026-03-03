@@ -8,3 +8,11 @@
 /dataSources.local.xml
 # Editor-based HTTP Client requests
 /httpRequests/
+/inspectionProfiles/profiles_settings.xml
+/inspectionProfiles/Project_Default.xml
+/dataSources.xml
+/misc.xml
+/vcs.xml
+/Vestaboard App.iml
+.idea/
+*.iml
