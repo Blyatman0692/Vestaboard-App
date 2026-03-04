@@ -1,12 +1,7 @@
-import os
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse, PlainTextResponse, JSONResponse
 import base64
-import secrets
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse, PlainTextResponse
-import httpx
-from urllib.parse import urlencode
-from fastapi.responses import JSONResponse
-from watchfiles import awatch
+import hashlib
 
 from sonos_app.config import SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, DB_URL, \
     SONOS_REDIRECT_URI
@@ -77,3 +72,50 @@ async def sonos_groups():
     household_id = households["households"][0]["id"]
 
     return await client.get_groups(household_id)
+
+def verify_sonos_event_signature(
+    seq_id: str,
+    namespace: str,
+    typ: str,
+    target_type: str,
+    target_value: str,
+    client_id: str,
+    client_secret: str,
+    signature: str
+) -> bool:
+    sha = hashlib.sha256()
+
+    for value in [
+        seq_id,
+        namespace,
+        typ,
+        target_type,
+        target_value,
+        client_id,
+        client_secret,
+    ]:
+        sha.update(value.encode("utf-8"))
+
+    return signature == base64.urlsafe_b64encode(sha.digest()).decode("utf-8").rstrip("=")
+
+@app.post("/sonos/events")
+async def sonos_events(request: Request):
+    headers = Request.headers
+    seq_id = headers.get("X-Sonos-Event-Seq-Id")
+    namespace = headers.get("X-Sonos-Namespace")
+    event_type = headers.get("X-Sonos-Type")
+    target_type = headers.get("X-Sonos-Target-Type")
+    target_value = headers.get("X-Sonos-Target-Value")
+    signature = headers.get("X-Sonos-Event-Signature")
+
+    if not verify_sonos_event_signature(seq_id, namespace, event_type,
+                                        target_type, target_value,
+                                        SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, signature):
+        raise HTTPException(status_code=401, detail="Invalid Sonos signature")
+
+    body = await request.json()
+
+    print("[SONOS EVENT]", seq_id, namespace, event_type, target_type,
+          target_value, body)
+
+    return JSONResponse({"ok": True})
