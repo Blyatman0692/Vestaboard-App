@@ -27,6 +27,16 @@ class SonosClient:
 
         return await self._get_json(url)
 
+    async def subscribe_playback(self, group_id: str):
+        url = f"{SONOS_CONTROL_BASE_URL}/groups/{group_id}/playback/subscription"
+
+        return await self._post_json(url)
+
+    async def subscribe_playback_metadata(self, group_id: str):
+        url = f"{SONOS_CONTROL_BASE_URL}/groups/{group_id}/playbackMetadata/subscription"
+
+        return await self._post_json(url)
+
     async def _get_json(self, url: str) -> dict:
         async def do_get(token: SonosToken):
             headers = {
@@ -82,3 +92,50 @@ class SonosClient:
                 f"Sonos API error {resp.status_code}: {resp.text}")
 
         return resp.json()
+
+    async def _post_json(self, url: str) -> dict:
+        async def do_post(token: SonosToken):
+            headers = {
+                "Authorization": f"Bearer {token.access_token}",
+                "Accept": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=20) as client:
+                return await client.post(url, headers=headers)
+
+        resp = await do_post(self.tokens)
+
+        if resp.status_code == 401:
+            latest = self.data_store.load_tokens()
+            if not latest or not latest.refresh_token:
+                raise RuntimeError(
+                    "Sonos access token expired and no refresh_token found. Re-auth required.")
+
+            refreshed = await self.oauth_client.refresh_token(
+                latest.refresh_token)
+
+            new_token = SonosToken(
+                access_token=refreshed["access_token"],
+                refresh_token=refreshed.get("refresh_token",
+                                            latest.refresh_token),
+                expires_in=refreshed.get("expires_in"),
+                scope=refreshed.get("scope"),
+                updated_at=datetime.datetime.utcnow(),
+            )
+
+            self.data_store.save_tokens(
+                {
+                    "access_token": new_token.access_token,
+                    "refresh_token": new_token.refresh_token,
+                    "expires_in": new_token.expires_in,
+                    "scope": new_token.scope,
+                }
+            )
+
+            self.tokens = new_token
+            resp = await do_post(self.tokens)
+
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"Sonos API error {resp.status_code}: {resp.text}")
+
+        return resp.json() if resp.text else {}
