@@ -119,3 +119,21 @@ async def sonos_events(request: Request):
           target_value, body)
 
     return JSONResponse({"ok": True})
+
+@app.post("/sonos/subscribe/{group_id}")
+async def subscribe_group(group_id: str):
+    tokens = db_client.load_tokens()
+    if not tokens:
+        raise HTTPException(status_code=400, detail="No tokens found. Run /oauth/start first.")
+
+    client = SonosClient(tokens, db_client, oauth_client)
+
+    await client.subscribe_playback_metadata(group_id)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "group_id": group_id,
+            "subscribed": ["playbackMetadata"],
+        }
+    )
