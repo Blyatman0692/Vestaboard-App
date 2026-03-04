@@ -100,7 +100,7 @@ def verify_sonos_event_signature(
 
 @app.post("/sonos/events")
 async def sonos_events(request: Request):
-    headers = Request.headers
+    headers = request.headers
     seq_id = headers.get("X-Sonos-Event-Seq-Id")
     namespace = headers.get("X-Sonos-Namespace")
     event_type = headers.get("X-Sonos-Type")
