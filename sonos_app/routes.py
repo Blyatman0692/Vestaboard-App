@@ -8,6 +8,7 @@ from sonos_app.config import SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, DB_URL, \
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.sonos_client import SonosToken, SonosClient
 from sonos_app.sonos_oauth_client import SonosOAuthClient
+from sonos_app.playback_metadata import parse_playback_metadata
 
 import logging
 
@@ -114,9 +115,8 @@ async def sonos_events(request: Request):
         raise HTTPException(status_code=401, detail="Invalid Sonos signature")
 
     body = await request.json()
-
-    print("[SONOS EVENT]", seq_id, namespace, event_type, target_type,
-          target_value, body)
+    metadata = parse_playback_metadata(request.headers, body)
+    print(metadata)
 
     return JSONResponse({"ok": True})
 
