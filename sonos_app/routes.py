@@ -6,6 +6,7 @@ import hashlib
 from sonos_app.config import SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, DB_URL, \
     SONOS_REDIRECT_URI
 from sonos_app.data_store import PostgresDataStore
+from sonos_app.event_processor import EventProcessor
 from sonos_app.sonos_client import SonosToken, SonosClient
 from sonos_app.sonos_oauth_client import SonosOAuthClient
 from sonos_app.playback_metadata import parse_playback_metadata
@@ -34,6 +35,8 @@ db_client = PostgresDataStore(
     DB_URL,
     SONOS_CLIENT_ID
 )
+
+event_processor = EventProcessor()
 
 @app.get("/health")
 def health():
@@ -109,13 +112,12 @@ async def sonos_events(request: Request):
     target_value = headers.get("X-Sonos-Target-Value")
     signature = headers.get("X-Sonos-Event-Signature")
 
-    if not verify_sonos_event_signature(seq_id, namespace, event_type,
-                                        target_type, target_value,
-                                        SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, signature):
+    if not verify_sonos_event_signature(seq_id, namespace, event_type, target_type, target_value, SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, signature):
         raise HTTPException(status_code=401, detail="Invalid Sonos signature")
 
     body = await request.json()
     metadata = parse_playback_metadata(request.headers, body)
+    event_processor.process_metadata(metadata)
     print(metadata)
 
     return JSONResponse({"ok": True})
