@@ -1,7 +1,7 @@
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.playback_metadata import PlaybackMetadata
 from vestaboard import VestaboardMessenger
-from config import DB_URL, SONOS_CLIENT_ID
+from sonos_app.config import DB_URL, SONOS_CLIENT_ID
 
 class EventProcessor:
     def __init__(self):
