@@ -17,15 +17,26 @@ def compose_vbml_component(template: str,
                            height: int = 1,
                            width:int = 22,
                            justify: str = "left",
-                           align: str = "top"
+                           align: str = "top",
+                           abs_x: int = None,
+                           abs_y: int = None
                            ):
+    style: Dict[str, Any] = {
+        "height": height,
+        "width": width
+    }
+
+    if abs_x is not None and abs_y is not None:
+        style["absolutePosition"] = {
+            "x": abs_x,
+            "y": abs_y
+        }
+    else:
+        style["justify"] = justify
+        style["align"] = align
+
     return {
-        "style": {
-            "height": height,
-            "width": width,
-            "justify": justify,
-            "align": align,
-        },
+        "style": style,
         "template": template
     }
 
