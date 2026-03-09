@@ -1,5 +1,9 @@
 requests
 python-dotenv
+fastapi
+uvicorn[standard]
+httpx
+psycopg[binary]
 openmeteo-requests
 requests-cache
 retry-requests
