@@ -1,9 +1,10 @@
 import os
 import time
 import random
-from typing import Any, Dict, Optional, List
-
+import json
 import requests
+from typing import Any, Dict, Optional, List
+from transitions import Transition, TransitionSpeed
 
 
 class VestaboardMessenger:
@@ -18,10 +19,11 @@ class VestaboardMessenger:
     Note: Vestaboard recommends not sending more often than ~1 message / 15 seconds.
     """
 
-    VESTABOARD_URL = "https://rw.vestaboard.com/"
+    VESTABOARD_URL = "https://cloud.vestaboard.com/"
+    TRANSITION_URL = "https://cloud.vestaboard.com/transition"
     VBML_URL_FORMAT = "https://vbml.vestaboard.com/format"
     VBML_URL_COMPOSE = "https://vbml.vestaboard.com/compose"
-    HEADER_NAME = "X-Vestaboard-Read-Write-Key"
+    HEADER_NAME = "X-Vestaboard-Token"
 
     def __init__(
         self,
@@ -115,7 +117,22 @@ class VestaboardMessenger:
 
     def get_message(self) -> Dict[str, Any]:
         """Fetch the current message shown on the Vestaboard."""
-        return self._request_json("GET", self.VESTABOARD_URL)
+        response = self._request_json("GET", self.VESTABOARD_URL)
+
+        current_message = response.get("currentMessage", {})
+        layout = current_message.get("layout")
+
+        if isinstance(layout, str):
+            try:
+                layout = json.loads(layout)
+            except json.JSONDecodeError:
+                pass
+
+        return {
+            "layout": layout,
+            "id": current_message.get("id"),
+            "raw": response,
+        }
 
     def send_message(self, message: str) -> Dict[str, Any]:
         """Send a plain-text message to the Vestaboard."""
@@ -127,11 +144,32 @@ class VestaboardMessenger:
         """
         return self._request_json("POST", self.VESTABOARD_URL, json=layout)
 
+    def get_transition(self) -> Dict[str, Transition | TransitionSpeed]:
+        """Fetch the current transition settings for the Vestaboard."""
+        response = self._request_json("GET", self.TRANSITION_URL)
+
+        return {
+            "transition": Transition(response["transition"]),
+            "transitionSpeed": TransitionSpeed(response["transitionSpeed"]),
+        }
+
+    def set_transition(self, transition: Transition, transition_speed: TransitionSpeed)\
+            -> Dict[str, Transition | TransitionSpeed]:
+        """Update the Vestaboard transition settings."""
+        payload = {
+            "transition": transition.value,
+            "transitionSpeed": transition_speed.value,
+        }
+        response = self._request_json("PUT", self.TRANSITION_URL, json=payload)
+
+        return {
+            "transition": Transition(response["transition"]),
+            "transitionSpeed": TransitionSpeed(response["transitionSpeed"]),
+        }
+
     def vbml_format_message(self, message: str) -> List[List]:
         payload = {"message": message}
         return self._request_json("POST", self.VBML_URL_FORMAT, json=payload)
 
     def vbml_compose_layout(self, payload) -> List[List]:
         return self._request_json("POST", self.VBML_URL_COMPOSE, json=payload)
-
-
