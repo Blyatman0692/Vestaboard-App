@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 from typing import List
 
@@ -8,8 +7,7 @@ from dotenv import load_dotenv
 from weather_app.weather_header import WeatherHeader
 from weather_app.weather import WeatherNow, WeatherClient, format_weather_line
 
-import utils
-from vestaboard import VestaboardMessenger
+from vestaboard import vestaboard, utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +30,7 @@ def run():
 
     wc = WeatherClient()
     weather_header = WeatherHeader()
-    vb = VestaboardMessenger()
+    vb = vestaboard.VestaboardMessenger()
 
     weather_data: List[WeatherNow] = []
 

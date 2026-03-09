@@ -4,7 +4,7 @@ import random
 import json
 import requests
 from typing import Any, Dict, Optional, List
-from transitions import Transition, TransitionSpeed
+from vestaboard.transitions import Transition, TransitionSpeed
 
 
 class VestaboardMessenger:

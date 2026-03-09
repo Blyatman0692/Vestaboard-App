@@ -6,12 +6,7 @@ from dotenv import load_dotenv
 from countdown_app.countdown import CountDown
 from countdown_app.targets import TARGET_DATES
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
-import utils
-from vestaboard import VestaboardMessenger
-
+from vestaboard import vestaboard, utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +27,7 @@ def run():
     if not utils.time_gate(logger, 8, 0, 8, 5):
         return
 
-    vb = VestaboardMessenger()
+    vb = vestaboard.VestaboardMessenger()
     ct = CountDown(TARGET_DATES)
 
     try:
