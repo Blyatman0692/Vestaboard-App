@@ -3,8 +3,11 @@ import time
 import random
 from dataclasses import dataclass
 from typing import Dict, Any, List
-
+from retry_requests import retry
+from datetime import datetime, timezone
 import requests
+import openmeteo_requests
+import requests_cache
 
 from weather_app.cities import CITY_COORDS
 
@@ -13,9 +16,20 @@ class WeatherNow:
     city: str
     temperature: float
     unit: str
-    condition: str
     wind_speed: int
     wind_unit: str
+
+@dataclass(frozen=True)
+class DetailedWeather:
+    city: str
+    temp_now: float
+    temp_max: float
+    temp_min: float
+    feels_like: float
+    uv_idx: float
+    rain_chance_today: float
+    condition: str
+    unit: str
 
 
 class WeatherClient:
@@ -51,6 +65,10 @@ class WeatherClient:
         self.retry_max_delay_s = retry_max_delay_s
         self._session = session or requests.Session()
 
+        self.cache_session = requests_cache.CachedSession('.cache', expire_after=500)
+        self.retry_session = retry(self.cache_session, retries=5, backoff_factor=0.2)
+        self.client = openmeteo_requests.Client(session=self.retry_session)
+
     @staticmethod
     def _is_retryable_status(status_code: int) -> bool:
         # Transient server-side or throttling
@@ -62,80 +80,104 @@ class WeatherClient:
         jitter = random.uniform(0.0, 0.5)
         time.sleep(backoff + jitter)
 
-    def get_current_weather(self, lat: float, lon: float, city: str) -> WeatherNow:
+    def get_detailed_weather(self, city: str, lat, lon) -> DetailedWeather:
         params = {
             "latitude": lat,
             "longitude": lon,
-            "current_weather": "true",
+            "current": [
+                "temperature_2m",
+                "apparent_temperature",
+                "weather_code",
+            ],
+            "hourly": [
+                "precipitation_probability",
+            ],
+            "daily": [
+                "temperature_2m_max",
+                "temperature_2m_min",
+                "uv_index_max",
+                "sunset",
+            ],
             "temperature_unit": self.temp_unit,
-            "windspeed_unit": "kmh" if self.wind_unit == "kmh" else "mph",
+            "windspeed_unit": self.wind_unit,
             "timezone": "auto",
         }
 
-        last_err: Exception | None = None
+        responses = self.client.weather_api(self.BASE_URL, params=params)
+        response = responses[0]
 
-        for attempt in range(1, self.retry_attempts + 1):
-            try:
-                resp = self._session.get(self.BASE_URL, params=params, timeout=self.timeout_s)
+        # -------- Current --------
+        current = response.Current()
+        temperature = current.Variables(0).Value()
+        feels_like = current.Variables(1).Value()
+        weather_code = int(current.Variables(2).Value())
 
-                # Retry only on transient HTTP status codes
-                if resp.status_code >= 400:
-                    if self._is_retryable_status(resp.status_code) and attempt < self.retry_attempts:
-                        self._sleep_backoff(attempt)
-                        continue
-                    resp.raise_for_status()
+        # -------- Daily --------
+        daily = response.Daily()
+        high = float(daily.Variables(0).ValuesAsNumpy()[0])
+        low = float(daily.Variables(1).ValuesAsNumpy()[0])
+        uv_index = float(daily.Variables(2).ValuesAsNumpy()[0])
 
-                data: Dict[str, Any] = resp.json()
-                cw = data.get("current_weather")
-                if not cw:
-                    raise RuntimeError(f"Unexpected response: missing 'current_weather': {data}")
+        # -------- Rain chance (derived) --------
+        hourly = response.Hourly()
+        rain_probs = hourly.Variables(0).ValuesAsNumpy()
 
-                temp = float(round(cw["temperature"], 1))
-                wind = int(round(cw["windspeed"]))
-                code = int(cw.get("weathercode", -1))
+        rain_chance_today = float(rain_probs[:24].max())
 
-                condition = self._weathercode_to_text(code)
-                unit = "C" if self.temp_unit == "celsius" else "F"
-                wind_unit = "kmh" if self.wind_unit == "kmh" else "mph"
+        detailed = DetailedWeather(
+            city=city,
+            temp_now=temperature,
+            temp_max=high,
+            temp_min=low,
+            feels_like=feels_like,
+            uv_idx=uv_index,
+            rain_chance_today=rain_chance_today,
+            condition=self._weathercode_to_text(weather_code),
+            unit="C" if self.temp_unit == "celsius" else "F"
+        )
 
-                return WeatherNow(
-                    city=city,
-                    temperature=temp,
-                    unit=unit,
-                    condition=condition,
-                    wind_speed=wind,
-                    wind_unit=wind_unit,
-                )
+        return detailed
 
-            except (requests.Timeout, requests.ConnectionError, requests.ChunkedEncodingError) as e:
-                # Network/transient failures
-                last_err = e
-                if attempt >= self.retry_attempts:
-                    break
-                self._sleep_backoff(attempt)
 
-            except requests.HTTPError as e:
-                # Non-retryable HTTP errors or retryable exhausted
-                last_err = e
-                break
-
-            except ValueError as e:
-                # JSON decode errors are usually transient/partial responses; retry a few times
-                last_err = e
-                if attempt >= self.retry_attempts:
-                    break
-                self._sleep_backoff(attempt)
-
-        assert last_err is not None
-        raise last_err
-
-    def get_current_weather_multi_cities(self) -> List[WeatherNow]:
+    def get_current_weather_multi_cities(self) -> list[WeatherNow]:
         results: List[WeatherNow] = []
 
         for city, (lat, lon) in self.cities_coords.items():
-            results.append(self.get_current_weather(lat, lon, city))
+            params = {
+                "latitude": lat,
+                "longitude": lon,
+                "current": ["temperature_2m", "wind_speed_10m", "weather_code"],
+                "temperature_unit": self.temp_unit,
+                "windspeed_unit": "kmh" if self.wind_unit == "kmh" else "mph",
+                "timezone": "auto",
+            }
+
+            responses = self.client.weather_api(self.BASE_URL, params=params)
+            response = responses[0]
+
+            results.append(self._parse_current_to_weather_now(response=response, city=city))
 
         return results
+
+    def _parse_current_to_weather_now(self, response, city: str) -> WeatherNow:
+        """
+        Convert Open-Meteo response object into WeatherNow.
+        """
+        current = response.Current()
+
+        temperature = float(current.Variables(0).Value())
+        wind_speed = int(round(float(current.Variables(1).Value())))
+        weather_code = int(current.Variables(2).Value())
+
+        unit = "C" if self.temp_unit == "celsius" else "F"
+
+        return WeatherNow(
+            city=city,
+            temperature=temperature,
+            unit=unit,
+            wind_speed=wind_speed,
+            wind_unit=self.wind_unit,
+        )
 
     @staticmethod
     def _weathercode_to_text(code: int) -> str:

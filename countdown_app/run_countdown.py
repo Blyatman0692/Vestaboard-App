@@ -28,8 +28,8 @@ def run():
 
     logger.info("Countdown job started")
 
-    # Time gate: only run between 09:15–09:17 Pacific Time
-    if not utils.time_gate(logger, 9, 15, 9, 17):
+    # Time gate: only run between 08:00–08:05 Pacific Time
+    if not utils.time_gate(logger, 8, 0, 8, 5):
         return
 
     vb = VestaboardMessenger()
