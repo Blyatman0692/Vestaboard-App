@@ -15,7 +15,7 @@ class EventProcessor:
             return
 
         vbml_components = []
-        # vbml_components.append(self.compose_header_components())
+        vbml_components.append(self.compose_header_components())
         vbml_components.append(self.compose_metadata_component(metadata))
 
         vbml_payload = utils.compose_vbml_payload(vbml_components)
@@ -94,7 +94,7 @@ class EventProcessor:
             align="top"
         )
 
-        return [track_name_comp, by_comp, artist_comp, album_comp]
+        return [track_name_comp]
 
 
 
