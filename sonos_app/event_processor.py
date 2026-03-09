@@ -15,7 +15,7 @@ class EventProcessor:
             return
 
         vbml_components = []
-        vbml_components.append(self.compose_header_components())
+        # vbml_components.append(self.compose_header_components())
         vbml_components.append(self.compose_metadata_component(metadata))
 
         vbml_payload = utils.compose_vbml_payload(vbml_components)
@@ -34,27 +34,11 @@ class EventProcessor:
 
     @staticmethod
     def compose_header_components():
-        left_filler_comp = utils.compose_vbml_component(
-            template="{66}{67}{68}",
+        top_comp = utils.compose_vbml_component(
+            template="{66}{67}{68}  NOW PLAYING   {68}{67}{66}",
             height=1,
-            width=3,
-            justify="left",
-            align="top"
-        )
-
-        center_comp = utils.compose_vbml_component(
-            template="NOW PLAYING",
-            height=1,
-            width=16,
+            width=22,
             justify="center",
-            align="top"
-        )
-
-        right_filler_comp = utils.compose_vbml_component(
-            template="{68}{67}{66}",
-            height=1,
-            width=3,
-            justify="right",
             align="top"
         )
 
@@ -74,7 +58,7 @@ class EventProcessor:
             abs_y=1
         )
 
-        return [left_filler_comp, center_comp, right_filler_comp, left_border, right_boarder]
+        return [top_comp, left_border, right_boarder]
 
     @staticmethod
     def compose_metadata_component(metadata: PlaybackMetadata):
@@ -102,7 +86,15 @@ class EventProcessor:
             align="top"
         )
 
-        return [track_name_comp, by_comp, artist_comp]
+        album_comp = utils.compose_vbml_component(
+            template=metadata.album_name,
+            height=1,
+            width=22,
+            justify="center",
+            align="top"
+        )
+
+        return [track_name_comp, by_comp, artist_comp, album_comp]
 
 
 
