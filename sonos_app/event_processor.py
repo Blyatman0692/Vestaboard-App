@@ -44,26 +44,26 @@ class EventProcessor:
     def compose_header_components():
         top_comp = utils.compose_vbml_component(
             template="{66}{67}{68}  NOW PLAYING   {68}{67}{66}",
-            height=2,
+            height=1,
             width=22,
             justify="center",
             align="top"
         )
-        return [top_comp]
+
+        placeholder = utils.compose_vbml_component(
+            template="",
+            height=1,
+            width=22,
+            justify="center",
+            align="top"
+        )
+        return [top_comp, placeholder]
 
     @staticmethod
     def compose_metadata_component(metadata: PlaybackMetadata):
         track_name_comp = utils.compose_vbml_component(
             template=metadata.track_name,
             height=2,
-            width=22,
-            justify="center",
-            align="top"
-        )
-
-        by_comp = utils.compose_vbml_component(
-            template="BY",
-            height=1,
             width=22,
             justify="center",
             align="top"
@@ -85,7 +85,7 @@ class EventProcessor:
             align="top"
         )
 
-        return [track_name_comp, by_comp, artist_comp, album_comp]
+        return [track_name_comp, artist_comp, album_comp]
 
 
 
