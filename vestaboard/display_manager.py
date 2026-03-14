@@ -29,7 +29,7 @@ class DisplayManager:
 
     def _set_transition(self, prev_record: BoardDisplayRecord, next_message: BoardMessage):
         if prev_record.state != next_message.state:
-            return Transition.WAVE, TransitionSpeed.FAST
+            return Transition.CURTAIN, TransitionSpeed.FAST
 
         return Transition.CLASSIC, TransitionSpeed.FAST
 
