@@ -4,10 +4,12 @@ from typing import List
 
 from dotenv import load_dotenv
 
+from vestaboard.board_message import BoardMessage
+from vestaboard.board_state import BoardState
 from weather_app.weather_header import WeatherHeader
 from weather_app.weather import WeatherNow, WeatherClient, format_weather_line
 
-from vestaboard import vestaboard, utils
+from vestaboard import vestaboard, utils, display_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +33,7 @@ def run():
     wc = WeatherClient()
     weather_header = WeatherHeader()
     vb = vestaboard.VestaboardMessenger()
+    manager = display_manager.DisplayManager()
 
     weather_data: List[WeatherNow] = []
 
@@ -60,7 +63,8 @@ def run():
     vbml_layout = vb.vbml_compose_layout(vbml_payload)
 
     try:
-        vb.send_layout(vbml_layout)
+        msg = BoardMessage(BoardState.WEATHER, "weather_app", layout=vbml_layout)
+        manager.send(msg)
         logger.info("Message sent successfully")
     except Exception:
         logger.exception("Error sending message")
