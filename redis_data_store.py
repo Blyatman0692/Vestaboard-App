@@ -1,10 +1,12 @@
-import os
+from dataclasses import dataclass
 import redis
-from dotenv import load_dotenv
-
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
 
+@dataclass
+class BoardDisplayRecord:
+    state: BoardState
+    source: str
 
 class RedisDataStore:
     KEY = "vestaboard:display:current"
@@ -21,7 +23,7 @@ class RedisDataStore:
         if not data:
             raise ValueError("No current board state recorded")
 
-        return BoardMessage(
+        return BoardDisplayRecord(
             state=BoardState(data["state"]),
             source=data["source"]
         )
