@@ -18,8 +18,8 @@ class EventProcessor:
 
         vbml_components = []
         headers = self.compose_header_components()
-
-        vbml_components.append(headers)
+        for h in headers:
+            vbml_components.append(h)
 
         metas = self.compose_metadata_component(metadata)
         for m in metas:
@@ -49,7 +49,7 @@ class EventProcessor:
             justify="center",
             align="top"
         )
-        return top_comp
+        return [top_comp]
 
     @staticmethod
     def compose_metadata_component(metadata: PlaybackMetadata):
