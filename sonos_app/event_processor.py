@@ -17,8 +17,7 @@ class EventProcessor:
         vbml_components = []
         headers = self.compose_header_components()
 
-        for h in headers:
-            vbml_components.append(h)
+        vbml_components.append(headers)
 
         metas = self.compose_metadata_component(metadata)
         for m in metas:
@@ -42,29 +41,12 @@ class EventProcessor:
     def compose_header_components():
         top_comp = utils.compose_vbml_component(
             template="{66}{67}{68}  NOW PLAYING   {68}{67}{66}",
-            height=1,
+            height=2,
             width=22,
             justify="center",
             align="top"
         )
-
-        left_border = utils.compose_vbml_component(
-            template="{66}\n{66}\n{66}\n{66}\n{66}",
-            height=5,
-            width=1,
-            abs_x=0,
-            abs_y=1
-        )
-
-        right_boarder = utils.compose_vbml_component(
-            template="{66}\n{66}\n{66}\n{66}\n{66}",
-            height=5,
-            width=1,
-            abs_x=21,
-            abs_y=1
-        )
-
-        return [top_comp, left_border, right_boarder]
+        return top_comp
 
     @staticmethod
     def compose_metadata_component(metadata: PlaybackMetadata):
