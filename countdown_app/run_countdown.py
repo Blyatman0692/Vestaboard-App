@@ -5,13 +5,9 @@ from dotenv import load_dotenv
 
 from countdown_app.countdown import CountDown
 from countdown_app.targets import TARGET_DATES
-
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
-import utils
-from vestaboard import VestaboardMessenger
-
+from vestaboard import vestaboard, utils, display_manager
+from vestaboard.board_message import BoardMessage
+from vestaboard.board_state import BoardState
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,8 +28,9 @@ def run():
     if not utils.time_gate(logger, 8, 0, 8, 5):
         return
 
-    vb = VestaboardMessenger()
+    vb = vestaboard.VestaboardMessenger()
     ct = CountDown(TARGET_DATES)
+    manager = display_manager.DisplayManager()
 
     try:
         results = ct.calculate_date_delta()
@@ -104,7 +101,8 @@ def run():
     vbml_layout = vb.vbml_compose_layout(vbml_payload)
 
     try:
-        vb.send_layout(vbml_layout)
+        msg = BoardMessage(BoardState.COUNTDOWN, "countdown_app", layout=vbml_layout)
+        manager.send(msg)
         logger.info("Countdown message sent successfully")
     except Exception:
         logger.exception("Error sending countdown message")

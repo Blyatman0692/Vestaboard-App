@@ -1,13 +1,15 @@
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.playback_metadata import PlaybackMetadata
-from vestaboard import VestaboardMessenger
+from vestaboard import vestaboard, utils, display_manager
 from sonos_app.config import DB_URL, SONOS_CLIENT_ID
+from vestaboard.board_message import BoardMessage
+from vestaboard.board_state import BoardState
 
-import utils
 
 class EventProcessor:
     def __init__(self):
-        self.vb_messenger = VestaboardMessenger()
+        self.vb_messenger = vestaboard.VestaboardMessenger()
+        self.manager = display_manager.DisplayManager()
         self.db_client = PostgresDataStore(DB_URL, SONOS_CLIENT_ID)
 
     def process_metadata(self, metadata: PlaybackMetadata):
@@ -27,7 +29,8 @@ class EventProcessor:
 
         vbml_layout = self.vb_messenger.vbml_compose_layout(vbml_payload)
 
-        self.vb_messenger.send_layout(vbml_layout)
+        msg = BoardMessage(BoardState.SONOS, "sonos_app", layout=vbml_layout)
+        self.manager.send(msg)
 
     @staticmethod
     def _is_relevant_metadata(metadata: PlaybackMetadata):

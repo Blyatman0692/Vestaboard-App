@@ -1,15 +1,15 @@
 import logging
-import os
 import sys
-from typing import List, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 
+from vestaboard.board_message import BoardMessage
+from vestaboard.board_state import BoardState
 from weather_app.weather_header import WeatherHeader
-from weather_app.weather import WeatherNow, WeatherClient, format_weather_line
+from weather_app.weather import WeatherClient
 
-import utils
-from vestaboard import VestaboardMessenger
+from vestaboard import vestaboard, utils, display_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,7 +70,8 @@ def run():
 
     wc = WeatherClient()
     weather_header = WeatherHeader()
-    vb = VestaboardMessenger()
+    vb = vestaboard.VestaboardMessenger()
+    manager = display_manager.DisplayManager()
 
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
 
@@ -173,6 +174,7 @@ def run():
     vbml_layout = vb.vbml_compose_layout(vbml_payload)
 
     try:
+        msg = BoardMessage(BoardState.WEATHER, "detailed_weather_app", layout=vbml_layout)
         vb.send_layout(vbml_layout)
         logger.info("Message sent successfully")
     except Exception:
