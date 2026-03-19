@@ -2,11 +2,14 @@ from dataclasses import dataclass
 import redis
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.transitions import Transition
+
 
 @dataclass
 class BoardDisplayRecord:
     state: BoardState
     source: str
+    transition: Transition
 
 class RedisDataStore:
     KEY = "vestaboard:display:current"
@@ -25,15 +28,17 @@ class RedisDataStore:
 
         return BoardDisplayRecord(
             state=BoardState(data["state"]),
-            source=data["source"]
+            source=data["source"],
+            transition=data["transition"]
         )
 
-    def set_current_record(self, message: BoardMessage):
+    def set_current_record(self, message: BoardMessage, transition: Transition):
         self.client.hset(
             name=self.KEY,
             mapping={
                 "state": message.state.value,
-                "source": message.source
+                "source": message.source,
+                "transition": transition.value
             }
         )
 
