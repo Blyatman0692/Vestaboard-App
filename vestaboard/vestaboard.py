@@ -3,7 +3,7 @@ import time
 import random
 import json
 import requests
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 from vestaboard.transitions import Transition, TransitionSpeed
 
 
@@ -154,18 +154,19 @@ class VestaboardMessenger:
         }
 
     def set_transition(self, transition: Transition, transition_speed: TransitionSpeed)\
-            -> Dict[str, Transition | TransitionSpeed]:
+            -> Tuple[Transition, TransitionSpeed]:
         """Update the Vestaboard transition settings."""
         payload = {
             "transition": transition.value,
             "transitionSpeed": transition_speed.value,
         }
+
         response = self._request_json("PUT", self.TRANSITION_URL, json=payload)
 
-        return {
-            "transition": Transition(response["transition"]),
-            "transitionSpeed": TransitionSpeed(response["transitionSpeed"]),
-        }
+        current_transition = Transition(response["transition"])
+        current_speed = TransitionSpeed(response["transitionSpeed"])
+
+        return current_transition, current_speed
 
     def vbml_format_message(self, message: str) -> List[List]:
         payload = {"message": message}
