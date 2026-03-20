@@ -6,6 +6,7 @@ import hashlib
 from app import build_sonos_container
 from sonos_app.sonos_client import SonosClient
 from sonos_app.playback_metadata import parse_playback_metadata
+from sonos_app.config import SONOS_CLIENT_ID, SONOS_CLIENT_SECRET
 
 import logging
 
