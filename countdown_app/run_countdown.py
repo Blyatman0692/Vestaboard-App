@@ -1,7 +1,7 @@
 import logging
 import sys
 
-from app import build_container
+from app import build_board_container
 from countdown_app.countdown import CountDown
 from countdown_app.targets import TARGET_DATES
 from vestaboard import utils
@@ -25,7 +25,7 @@ def run():
     if not utils.time_gate(logger, 8, 0, 8, 5):
         return
 
-    container = build_container()
+    container = build_board_container()
     vb = container.vestaboard_messenger
     ct = CountDown(TARGET_DATES)
     manager = container.display_manager

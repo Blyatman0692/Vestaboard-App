@@ -2,7 +2,7 @@ import logging
 import sys
 from typing import Optional
 
-from app import build_container
+from app import build_weather_container
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
 from weather_app.weather_header import WeatherHeader
@@ -64,11 +64,11 @@ def run():
     if not utils.time_gate(logger, 8, 0, 23, 0):
         return
 
-    container = build_container()
+    container = build_weather_container()
     wc = container.weather_client
     weather_header = WeatherHeader()
-    vb = container.vestaboard_messenger
-    manager = container.display_manager
+    vb = container.board.vestaboard_messenger
+    manager = container.board.display_manager
 
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
 
