@@ -3,12 +3,8 @@ from fastapi.responses import RedirectResponse, PlainTextResponse, JSONResponse
 import base64
 import hashlib
 
-from sonos_app.config import SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, DB_URL, \
-    SONOS_REDIRECT_URI
-from sonos_app.data_store import PostgresDataStore
-from sonos_app.event_processor import EventProcessor
-from sonos_app.sonos_client import SonosToken, SonosClient
-from sonos_app.sonos_oauth_client import SonosOAuthClient
+from app import build_sonos_container
+from sonos_app.sonos_client import SonosClient
 from sonos_app.playback_metadata import parse_playback_metadata
 
 import logging
@@ -22,21 +18,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 
-PENDING_STATES: set[str] = set()
-
-# global oauth client to store state
-oauth_client = SonosOAuthClient(
-    SONOS_CLIENT_ID,
-    SONOS_CLIENT_SECRET,
-    SONOS_REDIRECT_URI
-)
-
-db_client = PostgresDataStore(
-    DB_URL,
-    SONOS_CLIENT_ID
-)
-
-event_processor = EventProcessor()
+container = build_sonos_container()
+oauth_client = container.sonos_oauth_client
+db_client = container.sonos_data_store
+event_processor = container.sonos_event_processor
+sonos_config = container.config
 
 @app.get("/health")
 def health():
@@ -112,7 +98,16 @@ async def sonos_events(request: Request):
     target_value = headers.get("X-Sonos-Target-Value")
     signature = headers.get("X-Sonos-Event-Signature")
 
-    if not verify_sonos_event_signature(seq_id, namespace, event_type, target_type, target_value, SONOS_CLIENT_ID, SONOS_CLIENT_SECRET, signature):
+    if not verify_sonos_event_signature(
+        seq_id,
+        namespace,
+        event_type,
+        target_type,
+        target_value,
+        sonos_config.client_id,
+        sonos_config.client_secret,
+        signature,
+    ):
         raise HTTPException(status_code=401, detail="Invalid Sonos signature")
 
     body = await request.json()

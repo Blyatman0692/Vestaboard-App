@@ -1,7 +1,7 @@
 import datetime
 import httpx
 
-from sonos_app.config import SONOS_CONTROL_BASE_URL, SONOS_CLIENT_ID, DB_URL
+from sonos_app.config import SONOS_CONTROL_BASE_URL
 from sonos_app.sonos_oauth_client import SonosOAuthClient
 from sonos_app.token import SonosToken
 from sonos_app.data_store import PostgresDataStore

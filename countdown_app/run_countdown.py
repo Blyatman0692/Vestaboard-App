@@ -1,11 +1,10 @@
 import logging
 import sys
 
-from dotenv import load_dotenv
-
+from app import build_board_container
 from countdown_app.countdown import CountDown
 from countdown_app.targets import TARGET_DATES
-from vestaboard import vestaboard, utils, display_manager
+from vestaboard import utils
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
 
@@ -20,17 +19,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def run():
-    load_dotenv(override=False)
-
     logger.info("Countdown job started")
 
     # Time gate: only run between 08:00–08:05 Pacific Time
     if not utils.time_gate(logger, 8, 0, 8, 5):
         return
 
-    vb = vestaboard.VestaboardMessenger()
+    container = build_board_container()
+    vb = container.vestaboard_messenger
     ct = CountDown(TARGET_DATES)
-    manager = display_manager.DisplayManager()
+    manager = container.display_manager
 
     try:
         results = ct.calculate_date_delta()

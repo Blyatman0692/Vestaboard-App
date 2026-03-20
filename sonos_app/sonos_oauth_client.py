@@ -1,12 +1,9 @@
 import base64
 import secrets
 from urllib.parse import urlencode
-from sonos_app.config import SONOS_OAUTH_BASE_URL, SONOS_OAUTH_TOKEN_URL, \
-    DB_URL, SONOS_CLIENT_ID
+from sonos_app.config import SONOS_OAUTH_BASE_URL, SONOS_OAUTH_TOKEN_URL
 import httpx
 import logging
-
-from sonos_app.data_store import PostgresDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +19,12 @@ class SonosAuthTokenExchangeError(SonosAuthError):
 
 
 class SonosOAuthClient:
-    def __init__(self, client_id: str, client_secret: str, redirect_uri: str):
+    def __init__(self, client_id: str, client_secret: str, redirect_uri: str, data_store):
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
         self.auth_base_url = SONOS_OAUTH_BASE_URL
-        self.db_client = PostgresDataStore(DB_URL, SONOS_CLIENT_ID)
+        self.db_client = data_store
 
     def get_oauth_url(self) -> str:
         state = secrets.token_urlsafe(24)
@@ -105,6 +102,4 @@ class SonosOAuthClient:
             raise SonosAuthError(f"Refresh failed: {resp.status_code}")
 
         return resp.json()
-
-
 

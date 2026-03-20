@@ -2,14 +2,12 @@ import logging
 import sys
 from typing import Optional
 
-from dotenv import load_dotenv
-
+from app import build_weather_container
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
 from weather_app.weather_header import WeatherHeader
-from weather_app.weather import WeatherClient
 
-from vestaboard import vestaboard, utils, display_manager
+from vestaboard import utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,16 +60,15 @@ def format_string(
 def run():
     logger.info("Detailed weather job started")
 
-    load_dotenv(override=False)
-
     # Time gate: only run between 08:00–23:00 Pacific Time
     if not utils.time_gate(logger, 8, 0, 23, 0):
         return
 
-    wc = WeatherClient()
+    container = build_weather_container()
+    wc = container.weather_client
     weather_header = WeatherHeader()
-    vb = vestaboard.VestaboardMessenger()
-    manager = display_manager.DisplayManager()
+    vb = container.board.vestaboard_messenger
+    manager = container.board.display_manager
 
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
 
@@ -175,7 +172,7 @@ def run():
 
     try:
         msg = BoardMessage(BoardState.WEATHER, "detailed_weather_app", layout=vbml_layout)
-        vb.send_layout(vbml_layout)
+        manager.send(msg)
         logger.info("Message sent successfully")
     except Exception:
         logger.exception("Error sending message")
