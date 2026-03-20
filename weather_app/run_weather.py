@@ -2,14 +2,13 @@ import logging
 import sys
 from typing import List
 
-from dotenv import load_dotenv
-
+from app import build_container
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
 from weather_app.weather_header import WeatherHeader
-from weather_app.weather import WeatherNow, WeatherClient, format_weather_line
+from weather_app.weather import WeatherNow, format_weather_line
 
-from vestaboard import vestaboard, utils, display_manager
+from vestaboard import utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,16 +23,15 @@ logger = logging.getLogger(__name__)
 def run():
     logger.info("Weather job started")
 
-    load_dotenv(override=False)
-
     # Time gate: only run between 09:00–23:00 Pacific Time
     if not utils.time_gate(logger, 9, 0, 23, 0):
         return
 
-    wc = WeatherClient()
+    container = build_container()
+    wc = container.weather_client
     weather_header = WeatherHeader()
-    vb = vestaboard.VestaboardMessenger()
-    manager = display_manager.DisplayManager()
+    vb = container.vestaboard_messenger
+    manager = container.display_manager
 
     weather_data: List[WeatherNow] = []
 

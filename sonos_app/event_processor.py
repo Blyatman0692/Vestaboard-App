@@ -1,16 +1,19 @@
-from sonos_app.data_store import PostgresDataStore
 from sonos_app.playback_metadata import PlaybackMetadata
-from vestaboard import vestaboard, utils, display_manager
-from sonos_app.config import DB_URL, SONOS_CLIENT_ID
+from vestaboard import utils
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.display_manager import DisplayManager
+from vestaboard.vestaboard import VestaboardMessenger
 
 
 class EventProcessor:
-    def __init__(self):
-        self.vb_messenger = vestaboard.VestaboardMessenger()
-        self.manager = display_manager.DisplayManager()
-        self.db_client = PostgresDataStore(DB_URL, SONOS_CLIENT_ID)
+    def __init__(
+        self,
+        vestaboard_messenger: VestaboardMessenger,
+        display_manager: DisplayManager,
+    ):
+        self.vb_messenger = vestaboard_messenger
+        self.manager = display_manager
 
     def process_metadata(self, metadata: PlaybackMetadata):
         if not self._is_relevant_metadata(metadata):
@@ -86,6 +89,5 @@ class EventProcessor:
         )
 
         return [track_name_comp, artist_comp, album_comp]
-
 
 
