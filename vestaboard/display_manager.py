@@ -1,16 +1,16 @@
-import os
-
 from redis_data_store import RedisDataStore, BoardDisplayRecord
 from vestaboard.board_message import BoardMessage
 from vestaboard.transitions import Transition, TransitionSpeed
 from vestaboard.vestaboard import VestaboardMessenger
-from dotenv import load_dotenv
 
 class DisplayManager:
-    def __init__(self):
-        load_dotenv()
-        self.messenger = VestaboardMessenger()
-        self.redis_data_store = RedisDataStore(os.getenv("REDIS_URL"))
+    def __init__(
+        self,
+        messenger: VestaboardMessenger,
+        redis_data_store: RedisDataStore,
+    ):
+        self.messenger = messenger
+        self.redis_data_store = redis_data_store
 
 
     def send(self, message: BoardMessage):
