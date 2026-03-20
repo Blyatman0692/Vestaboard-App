@@ -79,6 +79,16 @@ class VestaboardMessenger:
                     timeout=self.timeout_s,
                 )
 
+                # Intercept 409 Conflict (Message already displayed)
+                if resp.status_code == 409:
+                    try:
+                        return resp.json()
+                    except ValueError:
+                        return {
+                            "status": "skipped",
+                            "detail": "Message already displayed on the board (409 Conflict)."
+                        }
+
                 # Retry on transient HTTP status codes
                 if resp.status_code >= 400:
                     retry_after_s: float | None = None
