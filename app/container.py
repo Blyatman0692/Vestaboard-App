@@ -25,7 +25,7 @@ class WeatherContainer:
 class SonosContainer:
     board: BoardContainer
     config: SonosConfig
-    sonos_data_store: "PostgresDataStore"
+    postgres_data_store: "PostgresDataStore"
     sonos_oauth_client: "SonosOAuthClient"
     sonos_event_processor: "EventProcessor"
 
@@ -87,7 +87,7 @@ def build_sonos_container(
     return SonosContainer(
         board=board,
         config=config,
-        sonos_data_store=sonos_data_store,
+        postgres_data_store=sonos_data_store,
         sonos_oauth_client=sonos_oauth_client,
         sonos_event_processor=sonos_event_processor,
     )

@@ -20,7 +20,7 @@ app = FastAPI()
 
 container = build_sonos_container()
 oauth_client = container.sonos_oauth_client
-db_client = container.sonos_data_store
+db_client = container.postgres_data_store
 event_processor = container.sonos_event_processor
 sonos_config = container.config
 
