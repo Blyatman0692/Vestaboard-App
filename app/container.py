@@ -1,24 +1,31 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
-from app.config import BoardConfig, SonosConfig
-from redis_data_store import RedisDataStore
-from vestaboard.display_manager import DisplayManager
-from vestaboard.vestaboard import VestaboardMessenger
-from weather_app.weather import WeatherClient
+from app.config import BoardConfig, FlightConfig, SonosConfig
+from flight_app.models import GeoBounds
+from flight_app.opensky_client import OpenSkyClient
 
 
 @dataclass(frozen=True)
 class BoardContainer:
     config: BoardConfig
-    vestaboard_messenger: VestaboardMessenger
-    redis_data_store: RedisDataStore
-    display_manager: DisplayManager
+    vestaboard_messenger: "VestaboardMessenger"
+    redis_data_store: "RedisDataStore"
+    display_manager: "DisplayManager"
 
 
 @dataclass(frozen=True)
 class WeatherContainer:
     board: BoardContainer
-    weather_client: WeatherClient
+    weather_client: "WeatherClient"
+
+
+@dataclass(frozen=True)
+class FlightContainer:
+    config: FlightConfig
+    bounds: GeoBounds
+    opensky_client: OpenSkyClient
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,10 @@ class SonosContainer:
 
 
 def build_board_container(config: BoardConfig | None = None) -> BoardContainer:
+    from redis_data_store import RedisDataStore
+    from vestaboard.display_manager import DisplayManager
+    from vestaboard.vestaboard import VestaboardMessenger
+
     config = config or BoardConfig.from_env()
 
     vestaboard_messenger = VestaboardMessenger(api_key=config.vb_rw_api_key)
@@ -49,11 +60,33 @@ def build_board_container(config: BoardConfig | None = None) -> BoardContainer:
 
 
 def build_weather_container(board: BoardContainer | None = None) -> WeatherContainer:
+    from weather_app.weather import WeatherClient
+
     board = board or build_board_container()
 
     return WeatherContainer(
         board=board,
         weather_client=WeatherClient(),
+    )
+
+
+def build_flight_container(config: FlightConfig | None = None) -> FlightContainer:
+    config = config or FlightConfig.from_env()
+    bounds = GeoBounds(
+        lamin=config.lamin,
+        lomin=config.lomin,
+        lamax=config.lamax,
+        lomax=config.lomax,
+    )
+    opensky_client = OpenSkyClient(
+        client_id=config.opensky_client_id,
+        client_secret=config.opensky_client_secret,
+    )
+
+    return FlightContainer(
+        config=config,
+        bounds=bounds,
+        opensky_client=opensky_client,
     )
 
 
