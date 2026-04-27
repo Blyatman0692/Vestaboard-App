@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,29 @@ class BoardConfig:
         return cls(
             vb_rw_api_key=os.environ["VB_RW_API_KEY"],
             redis_url=os.environ["REDIS_URL"],
+        )
+
+
+@dataclass(frozen=True)
+class FlightConfig:
+    lamin: float
+    lomin: float
+    lamax: float
+    lomax: float
+    opensky_client_id: Optional[str] = None
+    opensky_client_secret: Optional[str] = None
+
+    @classmethod
+    def from_env(cls, *, load_env: bool = True) -> "FlightConfig":
+        _load_dotenv_if_needed(load_env)
+
+        return cls(
+            lamin=float(os.environ["FLIGHT_LAMIN"]),
+            lomin=float(os.environ["FLIGHT_LOMIN"]),
+            lamax=float(os.environ["FLIGHT_LAMAX"]),
+            lomax=float(os.environ["FLIGHT_LOMAX"]),
+            opensky_client_id=os.getenv("OPENSKY_CLIENT_ID"),
+            opensky_client_secret=os.getenv("OPENSKY_CLIENT_SECRET"),
         )
 
 
