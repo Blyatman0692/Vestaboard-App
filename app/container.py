@@ -81,7 +81,6 @@ def build_flight_container(config: FlightConfig | None = None) -> FlightContaine
     opensky_client = OpenSkyClient(
         client_id=config.opensky_client_id,
         client_secret=config.opensky_client_secret,
-        timeout_s=30
     )
 
     return FlightContainer(
