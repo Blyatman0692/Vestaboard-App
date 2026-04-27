@@ -16,3 +16,10 @@
 /Vestaboard App.iml
 .idea/
 *.iml
+
+/inspectionProfiles/profiles_settings.xml
+/inspectionProfiles/Project_Default.xml
+/dataSources.xml
+/misc.xml
+/vcs.xml
+/Vestaboard App.iml
