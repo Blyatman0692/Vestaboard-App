@@ -46,6 +46,43 @@ def _required_float_env(name: str) -> float:
         raise
 
 
+def _optional_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        logger.exception(
+            "Optional environment variable %s must be an integer; raw_length=%d",
+            name,
+            len(raw_value),
+        )
+        raise
+
+
+def _optional_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+
+    logger.warning(
+        "Optional environment variable %s has unrecognized boolean value; "
+        "using default=%s raw_length=%d",
+        name,
+        default,
+        len(raw_value),
+    )
+    return default
+
+
 @dataclass(frozen=True)
 class BoardConfig:
     vb_rw_api_key: str
@@ -69,6 +106,8 @@ class FlightConfig:
     lomax: float
     opensky_client_id: Optional[str] = None
     opensky_client_secret: Optional[str] = None
+    opensky_token_timeout_s: int = 10
+    opensky_anonymous_fallback_on_auth_network_error: bool = True
 
     @classmethod
     def from_env(cls, *, load_env: bool = True) -> "FlightConfig":
@@ -85,6 +124,10 @@ class FlightConfig:
                 "FLIGHT_LOMAX": _env_state("FLIGHT_LOMAX"),
                 "OPENSKY_CLIENT_ID": _env_state("OPENSKY_CLIENT_ID", secret=True),
                 "OPENSKY_CLIENT_SECRET": _env_state("OPENSKY_CLIENT_SECRET", secret=True),
+                "OPENSKY_TOKEN_TIMEOUT_S": _env_state("OPENSKY_TOKEN_TIMEOUT_S"),
+                "OPENSKY_ANONYMOUS_FALLBACK_ON_AUTH_NETWORK_ERROR": _env_state(
+                    "OPENSKY_ANONYMOUS_FALLBACK_ON_AUTH_NETWORK_ERROR"
+                ),
             },
         )
 
@@ -103,10 +146,16 @@ class FlightConfig:
             lomax=_required_float_env("FLIGHT_LOMAX"),
             opensky_client_id=opensky_client_id,
             opensky_client_secret=opensky_client_secret,
+            opensky_token_timeout_s=_optional_int_env("OPENSKY_TOKEN_TIMEOUT_S", 10),
+            opensky_anonymous_fallback_on_auth_network_error=_optional_bool_env(
+                "OPENSKY_ANONYMOUS_FALLBACK_ON_AUTH_NETWORK_ERROR",
+                True,
+            ),
         )
 
         logger.info(
-            "Flight config loaded: bounds=%s opensky_auth=%s",
+            "Flight config loaded: bounds=%s opensky_auth=%s token_timeout_s=%s "
+            "anonymous_fallback_on_auth_network_error=%s",
             {
                 "lamin": config.lamin,
                 "lomin": config.lomin,
@@ -114,6 +163,8 @@ class FlightConfig:
                 "lomax": config.lomax,
             },
             "enabled" if config.opensky_client_id and config.opensky_client_secret else "disabled",
+            config.opensky_token_timeout_s,
+            config.opensky_anonymous_fallback_on_auth_network_error,
         )
         return config
 

@@ -73,15 +73,18 @@ def run() -> None:
     container = build_flight_container()
     logger.info(
         "Flight container built: bounds=%s opensky_timeout_s=%s "
-        "opensky_retry_attempts=%s opensky_auth=%s",
+        "opensky_token_timeout_s=%s opensky_retry_attempts=%s opensky_auth=%s "
+        "anonymous_fallback_on_auth_network_error=%s",
         container.bounds.as_params(),
         container.opensky_client.timeout_s,
+        container.opensky_client.token_timeout_s,
         container.opensky_client.retry_attempts,
         (
             "enabled"
             if container.opensky_client.client_id and container.opensky_client.client_secret
             else "disabled"
         ),
+        container.opensky_client.anonymous_fallback_on_auth_network_error,
     )
 
     flights = container.opensky_client.get_flights_in_bounds(container.bounds)

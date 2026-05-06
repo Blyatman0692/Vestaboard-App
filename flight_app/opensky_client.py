@@ -25,20 +25,27 @@ class OpenSkyClient:
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
         timeout_s: int = 60,
+        token_timeout_s: int = 10,
         retry_attempts: int = 10,
         retry_base_delay_s: float = 0.8,
         retry_max_delay_s: float = 8.0,
+        anonymous_fallback_on_auth_network_error: bool = True,
         session: requests.Session | None = None,
     ):
         self.client_id = client_id
         self.client_secret = client_secret
         self.timeout_s = timeout_s
+        self.token_timeout_s = token_timeout_s
         self.retry_attempts = retry_attempts
         self.retry_base_delay_s = retry_base_delay_s
         self.retry_max_delay_s = retry_max_delay_s
+        self.anonymous_fallback_on_auth_network_error = (
+            anonymous_fallback_on_auth_network_error
+        )
         self._session = session or requests.Session()
         self._access_token: str | None = None
         self._token_expires_at: datetime | None = None
+        self._auth_network_unavailable = False
 
     @staticmethod
     def _is_retryable_status(status_code: int) -> bool:
@@ -55,10 +62,12 @@ class OpenSkyClient:
 
     def get_flights_in_bounds(self, bounds: GeoBounds) -> list[FlightInfo]:
         logger.info(
-            "Fetching OpenSky flights in bounds: params=%s auth=%s timeout_s=%s retry_attempts=%s",
+            "Fetching OpenSky flights in bounds: params=%s auth=%s timeout_s=%s "
+            "token_timeout_s=%s retry_attempts=%s",
             bounds.as_params(),
-            "enabled" if self._uses_auth() else "disabled",
+            self._auth_status(),
             self.timeout_s,
+            self.token_timeout_s,
             self.retry_attempts,
         )
         payload = self._request_json(bounds.as_params())
@@ -179,11 +188,36 @@ class OpenSkyClient:
     def _uses_auth(self) -> bool:
         return bool(self.client_id and self.client_secret)
 
-    def _auth_headers(self, *, force_refresh: bool = False) -> dict[str, str] | None:
+    def _can_try_auth(self) -> bool:
+        return self._uses_auth() and not self._auth_network_unavailable
+
+    def _auth_status(self) -> str:
         if not self._uses_auth():
+            return "disabled"
+        if self._auth_network_unavailable:
+            return "anonymous-fallback"
+        return "enabled"
+
+    def _auth_headers(self, *, force_refresh: bool = False) -> dict[str, str] | None:
+        if not self._can_try_auth():
             return None
 
-        token = self._get_token(force_refresh=force_refresh)
+        try:
+            token = self._get_token(force_refresh=force_refresh)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if not self.anonymous_fallback_on_auth_network_error:
+                raise
+
+            self._auth_network_unavailable = True
+            logger.warning(
+                "OpenSky token network error; falling back to anonymous states "
+                "requests for this process: %s: %s",
+                type(e).__name__,
+                e,
+                exc_info=True,
+            )
+            return None
+
         return {"Authorization": f"Bearer {token}"}
 
     def _get_token(self, *, force_refresh: bool = False) -> str:
@@ -210,7 +244,7 @@ class OpenSkyClient:
                 "client_id": self.client_id,
                 "client_secret": self.client_secret,
             },
-            timeout=self.timeout_s,
+            timeout=self.token_timeout_s,
         )
         self._log_response("OpenSky token response", resp)
         if resp.status_code >= 400:
