@@ -1,3 +1,4 @@
+import logging
 import random
 import time
 from datetime import datetime, timedelta
@@ -8,9 +9,15 @@ import requests
 from flight_app.models import FlightInfo, GeoBounds, unix_to_utc
 
 
+logger = logging.getLogger(__name__)
+
+
 class OpenSkyClient:
     BASE_URL = "https://opensky-network.org/api/states/all"
-    TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+    TOKEN_URL = (
+        "https://auth.opensky-network.org/auth/realms/opensky-network/"
+        "protocol/openid-connect/token"
+    )
     TOKEN_REFRESH_MARGIN_S = 30
 
     def __init__(
@@ -47,51 +54,126 @@ class OpenSkyClient:
         time.sleep(backoff + jitter)
 
     def get_flights_in_bounds(self, bounds: GeoBounds) -> list[FlightInfo]:
+        logger.info(
+            "Fetching OpenSky flights in bounds: params=%s auth=%s timeout_s=%s retry_attempts=%s",
+            bounds.as_params(),
+            "enabled" if self._uses_auth() else "disabled",
+            self.timeout_s,
+            self.retry_attempts,
+        )
         payload = self._request_json(bounds.as_params())
         states = payload.get("states") or []
-        return [self._parse_state(state) for state in states]
+        flights = [self._parse_state(state) for state in states]
+        logger.info(
+            "Parsed OpenSky states: raw_states=%d parsed_flights=%d",
+            len(states),
+            len(flights),
+        )
+        return flights
 
     def _request_json(self, params: dict[str, float]) -> dict[str, Any]:
         last_err: Exception | None = None
 
         for attempt in range(1, self.retry_attempts + 1):
             try:
+                logger.info(
+                    "OpenSky states request attempt %d/%d started",
+                    attempt,
+                    self.retry_attempts,
+                )
                 resp = self._session.get(
                     self.BASE_URL,
                     params=params,
                     headers=self._auth_headers(),
                     timeout=self.timeout_s,
                 )
+                self._log_response("OpenSky states response", resp)
 
                 if resp.status_code == 401 and self._uses_auth():
+                    logger.warning(
+                        "OpenSky states request returned 401 with credentials; "
+                        "refreshing token and retrying once."
+                    )
                     resp = self._session.get(
                         self.BASE_URL,
                         params=params,
                         headers=self._auth_headers(force_refresh=True),
                         timeout=self.timeout_s,
                     )
+                    self._log_response("OpenSky states response after token refresh", resp)
 
                 if resp.status_code >= 400:
                     retry_after_s = self._parse_retry_after(resp)
-                    if self._is_retryable_status(resp.status_code) and attempt < self.retry_attempts:
+                    if (
+                        self._is_retryable_status(resp.status_code)
+                        and attempt < self.retry_attempts
+                    ):
+                        logger.warning(
+                            "OpenSky states request failed with retryable status=%d "
+                            "attempt=%d/%d retry_after_s=%s body_excerpt=%r",
+                            resp.status_code,
+                            attempt,
+                            self.retry_attempts,
+                            retry_after_s,
+                            self._response_excerpt(resp),
+                        )
                         self._sleep_backoff(attempt, retry_after_s=retry_after_s)
                         continue
 
+                    logger.error(
+                        "OpenSky states request failed with status=%d body_excerpt=%r",
+                        resp.status_code,
+                        self._response_excerpt(resp),
+                    )
                     resp.raise_for_status()
 
-                return resp.json()
+                try:
+                    payload = resp.json()
+                except ValueError:
+                    logger.error(
+                        "OpenSky states response was not valid JSON: status=%d body_excerpt=%r",
+                        resp.status_code,
+                        self._response_excerpt(resp),
+                    )
+                    raise
+
+                logger.info(
+                    "OpenSky states payload decoded: keys=%s states_count=%s api_time=%s",
+                    sorted(payload.keys()),
+                    len(payload.get("states") or []),
+                    payload.get("time"),
+                )
+                return payload
 
             except (requests.Timeout, requests.ConnectionError, ValueError) as e:
                 last_err = e
+                logger.warning(
+                    "OpenSky states request attempt %d/%d raised %s: %s",
+                    attempt,
+                    self.retry_attempts,
+                    type(e).__name__,
+                    e,
+                    exc_info=attempt >= self.retry_attempts,
+                )
                 if attempt >= self.retry_attempts:
                     break
                 self._sleep_backoff(attempt)
 
             except requests.HTTPError as e:
                 last_err = e
+                logger.exception(
+                    "OpenSky states request failed with non-retryable HTTP error on attempt %d/%d",
+                    attempt,
+                    self.retry_attempts,
+                )
                 break
 
         assert last_err is not None
+        logger.error(
+            "OpenSky states request exhausted retries; raising last error: %s: %s",
+            type(last_err).__name__,
+            last_err,
+        )
         raise last_err
 
     def _uses_auth(self) -> bool:
@@ -112,8 +194,15 @@ class OpenSkyClient:
             and self._token_expires_at
             and now < self._token_expires_at
         ):
+            logger.debug("Using cached OpenSky access token.")
             return self._access_token
 
+        logger.info(
+            "OpenSky token request started: force_refresh=%s client_id_set=%s client_secret_set=%s",
+            force_refresh,
+            bool(self.client_id),
+            bool(self.client_secret),
+        )
         resp = self._session.post(
             self.TOKEN_URL,
             data={
@@ -123,13 +212,40 @@ class OpenSkyClient:
             },
             timeout=self.timeout_s,
         )
+        self._log_response("OpenSky token response", resp)
+        if resp.status_code >= 400:
+            logger.error(
+                "OpenSky token request failed with status=%d body_excerpt=%r",
+                resp.status_code,
+                self._response_excerpt(resp),
+            )
         resp.raise_for_status()
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.error(
+                "OpenSky token response was not valid JSON: status=%d body_excerpt=%r",
+                resp.status_code,
+                self._response_excerpt(resp),
+            )
+            raise
+
+        if "access_token" not in data:
+            logger.error(
+                "OpenSky token response missing access_token: keys=%s",
+                sorted(data.keys()),
+            )
+
         self._access_token = data["access_token"]
         expires_in = int(data.get("expires_in", 1800))
         self._token_expires_at = now + timedelta(
             seconds=max(0, expires_in - self.TOKEN_REFRESH_MARGIN_S)
+        )
+        logger.info(
+            "OpenSky token cached: expires_in_s=%d refresh_at=%s",
+            expires_in,
+            self._token_expires_at.isoformat(),
         )
         return self._access_token
 
@@ -143,6 +259,29 @@ class OpenSkyClient:
             return float(value)
         except ValueError:
             return None
+
+    @staticmethod
+    def _response_excerpt(resp: requests.Response, *, limit: int = 500) -> str:
+        try:
+            body = resp.text
+        except Exception as e:
+            return f"<unable to read response body: {type(e).__name__}>"
+
+        body = " ".join(body.split())
+        if len(body) <= limit:
+            return body
+        return f"{body[:limit]}..."
+
+    @staticmethod
+    def _log_response(message: str, resp: requests.Response) -> None:
+        logger.info(
+            "%s: status=%d elapsed_ms=%d retry_after=%s content_type=%s",
+            message,
+            resp.status_code,
+            round(resp.elapsed.total_seconds() * 1000),
+            resp.headers.get("Retry-After"),
+            resp.headers.get("Content-Type"),
+        )
 
     @staticmethod
     def _parse_state(state: list[Any]) -> FlightInfo:
