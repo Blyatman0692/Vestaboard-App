@@ -85,15 +85,17 @@ class OpenSkyClient:
 
         for attempt in range(1, self.retry_attempts + 1):
             try:
+                auth_headers = self._auth_headers()
                 logger.info(
-                    "OpenSky states request attempt %d/%d started",
+                    "OpenSky states request attempt %d/%d started: auth=%s",
                     attempt,
                     self.retry_attempts,
+                    self._auth_status(),
                 )
                 resp = self._session.get(
                     self.BASE_URL,
                     params=params,
-                    headers=self._auth_headers(),
+                    headers=auth_headers,
                     timeout=self.timeout_s,
                 )
                 self._log_response("OpenSky states response", resp)
@@ -214,8 +216,8 @@ class OpenSkyClient:
                 "requests for this process: %s: %s",
                 type(e).__name__,
                 e,
-                exc_info=True,
             )
+            logger.debug("OpenSky token network error traceback", exc_info=True)
             return None
 
         return {"Authorization": f"Bearer {token}"}
