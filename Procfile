@@ -1,1 +1,1 @@
-web: python -m uvicorn sonos_app.get_auth:app --host 0.0.0.0 --port $PORT
+web: python -m uvicorn sonos_app.routes:app --host 0.0.0.0 --port $PORT
