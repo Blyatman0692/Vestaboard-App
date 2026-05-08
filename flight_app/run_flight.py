@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 
 from app import build_flight_container
@@ -19,48 +18,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _get_limit() -> int:
-    raw_limit = os.environ.get("FLIGHT_LIMIT", "10")
-    try:
-        limit = int(raw_limit)
-    except ValueError as exc:
-        raise ValueError("FLIGHT_LIMIT must be an integer.") from exc
-
-    if limit <= 0:
-        raise ValueError("FLIGHT_LIMIT must be greater than 0.")
-
-    return limit
-
-
-def _format_position(position: FlightPosition) -> str:
-    return (
-        f"{position.display_name:<8} "
-        f"{position.route:<7} "
-        f"{position.aircraft_type or '?':<4} "
-        f"alt={position.alt:<5} "
-        f"speed={position.gspeed:<3}kt "
-        f"src={position.source}"
-    )
-
-
-def _flight_number(position: FlightPosition) -> str:
-    return position.flight or position.callsign or position.fr24_id
-
-
-def _flight_route(position: FlightPosition) -> str:
-    origin = position.orig_iata or position.orig_icao or "?"
-    destination = position.dest_iata or position.dest_icao or "?"
-    return f"{origin} TO {destination}"
-
-
-def _speed_kmh(position: FlightPosition) -> int:
-    return round(position.gspeed * 1.852)
-
-
-def _altitude_meters(position: FlightPosition) -> int:
-    return round(position.alt * 0.3048)
-
-
 def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
     vbml_components = []
     
@@ -78,13 +35,13 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            _flight_number(position), 1, 11, "right", "top"
+            position.flight_number, 1, 11, "right", "top"
         )
     )
 
     vbml_components.append(
         utils.compose_vbml_component(
-            position.aircraft_type or "?", 1, 22, "left", "top"
+            position.aircraft_type_display, 1, 22, "left", "top"
         )
     )
 
@@ -96,7 +53,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            _flight_route(position), 1, 11, "right", "top"
+            position.route, 1, 11, "right", "top"
         )
     )
 
@@ -108,7 +65,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            f"{_speed_kmh(position)} kmh", 1, 11, "right", "top"
+            f"{position.speed_kmh} kmh", 1, 11, "right", "top"
         )
     )
 
@@ -120,7 +77,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            f"{_altitude_meters(position)} m", 1, 11, "right", "top"
+            f"{position.altitude_meters} m", 1, 11, "right", "top"
         )
     )
 
@@ -135,6 +92,16 @@ def _send_position_to_vestaboard(container, position: FlightPosition) -> None:
     container.board.display_manager.send(msg)
 
 
+def _has_seen_flight(container, fr24_id: str) -> bool:
+    return container.board.redis_data_store.has_seen_flight(fr24_id)
+
+
+def _mark_flight_seen(container, fr24_id: str) -> None:
+    container.board.redis_data_store.mark_flight_seen(
+        fr24_id,
+    )
+
+
 def run() -> None:
     logger.info("Flight job started")
 
@@ -144,24 +111,44 @@ def run() -> None:
 
     container = build_flight_container()
     bounds = container.config.bounds.to_fr24_bounds()
-    limit = _get_limit()
 
-    logger.info("Fetching FR24 live positions: bounds=%s limit=%d", bounds, limit)
-    positions = container.flight_radar_client.get_live_positions_full(
+    logger.info("Checking FR24 light live positions: bounds=%s limit=1", bounds)
+    light_positions = container.flight_radar_client.get_live_positions_light(
         bounds=bounds,
-        limit=limit,
+        limit=1,
     )
 
-    logger.info("Retrieved %d flight positions", len(positions))
+    logger.info("Retrieved %d light flight positions", len(light_positions))
+    if not light_positions:
+        logger.info("No flight positions retrieved; skipping full lookup and Vestaboard update")
+        return
+
+    light_position = light_positions[0]
+    if _has_seen_flight(container, light_position.fr24_id):
+        logger.info("Flight %s already seen from light lookup; skipping full lookup", light_position.fr24_id)
+        return
+
+    logger.info("Fetching FR24 full live position details: bounds=%s limit=1", bounds)
+    positions = container.flight_radar_client.get_live_positions_full(
+        bounds=bounds,
+        limit=1,
+    )
+
+    logger.info("Retrieved %d full flight positions", len(positions))
     if not positions:
-        logger.info("No flight positions retrieved; skipping Vestaboard update")
+        logger.info("Light lookup found a flight, but full lookup returned none; skipping Vestaboard update")
         return
 
     position = positions[0]
-    logger.info("Selected flight for Vestaboard: %s", _format_position(position))
-    print(_format_position(position))
+    if _has_seen_flight(container, position.fr24_id):
+        logger.info("Flight %s already seen from full lookup; skipping Vestaboard update", position.fr24_id)
+        return
+
+    logger.info("Selected flight for Vestaboard: %s", position.console_summary)
+    print(position.console_summary)
 
     _send_position_to_vestaboard(container, position)
+    _mark_flight_seen(container, position.fr24_id)
     logger.info("Flight message sent successfully")
 
 
