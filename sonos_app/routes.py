@@ -202,10 +202,23 @@ async def subscribe_group(group_id: str, request: Request):
     except SonosReauthorizationRequired as exc:
         return reauthorization_response(request, str(exc))
 
+    subscription = db_client.save_playback_metadata_subscription(group_id)
+
     return JSONResponse(
         {
             "ok": True,
             "group_id": group_id,
             "subscribed": ["playbackMetadata"],
+            "subscription": subscription,
+        }
+    )
+
+
+@app.get("/sonos/subscriptions")
+def sonos_subscriptions():
+    return JSONResponse(
+        {
+            "ok": True,
+            "subscriptions": db_client.list_playback_metadata_subscriptions(),
         }
     )
