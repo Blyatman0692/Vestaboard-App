@@ -4,7 +4,8 @@ import base64
 import hashlib
 
 from app import build_sonos_container
-from sonos_app.sonos_client import SonosClient
+from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
+from sonos_app.sonos_oauth_client import SonosAuthError
 from sonos_app.playback_metadata import parse_playback_metadata
 
 import logging
@@ -24,6 +25,33 @@ db_client = container.postgres_data_store
 event_processor = container.sonos_event_processor
 sonos_config = container.config
 
+
+def reauthorization_payload(request: Request, detail: str) -> dict[str, str | bool]:
+    return {
+        "ok": False,
+        "error": "sonos_reauthorization_required",
+        "detail": detail,
+        "reauthorize_url": str(request.url_for("oauth_start")),
+        "reauthorize_path": "/oauth/start",
+    }
+
+
+def reauthorization_response(request: Request, detail: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content=reauthorization_payload(request, detail),
+    )
+
+
+def load_tokens_or_reauthorize():
+    tokens = db_client.load_tokens()
+    if not tokens or not tokens.refresh_token:
+        raise SonosReauthorizationRequired(
+            "No usable Sonos authorization was found. Start OAuth again."
+        )
+    return tokens
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -39,29 +67,72 @@ async def oauth_callback(code: str, state: str):
         "[OAUTH CALLBACK] Received state=%s",
         state,
     )
-    tokens = await oauth_client.oauth_callback(code, state)
+    try:
+        tokens = await oauth_client.oauth_callback(code, state)
+    except SonosAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     db_client.save_tokens(tokens)
 
     return PlainTextResponse("Authorization successful. Close this tab.")
 
-@app.get("/sonos/households")
-async def sonos_households():
+
+@app.get("/sonos/auth/status")
+def sonos_auth_status(request: Request):
     tokens = db_client.load_tokens()
+    authorized = bool(tokens and tokens.access_token and tokens.refresh_token)
+
+    response = {
+        "ok": True,
+        "authorized": authorized,
+        "reauthorization_required": not authorized,
+        "reauthorize_url": str(request.url_for("oauth_start")),
+        "reauthorize_path": "/oauth/start",
+    }
+
+    if tokens:
+        response.update(
+            {
+                "scope": tokens.scope,
+                "expires_in": tokens.expires_in,
+                "updated_at": tokens.updated_at,
+                "refresh_token_available": bool(tokens.refresh_token),
+            }
+        )
+
+    return JSONResponse(response)
+
+
+@app.get("/sonos/households")
+async def sonos_households(request: Request):
+    try:
+        tokens = load_tokens_or_reauthorize()
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
 
     client = SonosClient(tokens, db_client, oauth_client)
 
-    return await client.get_households()
+    try:
+        return await client.get_households()
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
 
 @app.get("/sonos/groups")
-async def sonos_groups():
-    tokens = db_client.load_tokens()
+async def sonos_groups(request: Request):
+    try:
+        tokens = load_tokens_or_reauthorize()
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
+
     client = SonosClient(tokens, db_client, oauth_client)
 
-    households = await client.get_households()
-    household_id = households["households"][0]["id"]
+    try:
+        households = await client.get_households()
+        household_id = households["households"][0]["id"]
 
-    return await client.get_groups(household_id)
+        return await client.get_groups(household_id)
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
 
 def verify_sonos_event_signature(
     seq_id: str,
@@ -118,14 +189,18 @@ async def sonos_events(request: Request):
     return JSONResponse({"ok": True})
 
 @app.post("/sonos/subscribe/{group_id}")
-async def subscribe_group(group_id: str):
-    tokens = db_client.load_tokens()
-    if not tokens:
-        raise HTTPException(status_code=400, detail="No tokens found. Run /oauth/start first.")
+async def subscribe_group(group_id: str, request: Request):
+    try:
+        tokens = load_tokens_or_reauthorize()
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
 
     client = SonosClient(tokens, db_client, oauth_client)
 
-    await client.subscribe_playback_metadata(group_id)
+    try:
+        await client.subscribe_playback_metadata(group_id)
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
 
     return JSONResponse(
         {

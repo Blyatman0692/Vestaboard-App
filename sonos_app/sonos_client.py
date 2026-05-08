@@ -2,9 +2,13 @@ import datetime
 import httpx
 
 from sonos_app.config import SONOS_CONTROL_BASE_URL
-from sonos_app.sonos_oauth_client import SonosOAuthClient
+from sonos_app.sonos_oauth_client import SonosAuthTokenRefreshError, SonosOAuthClient
 from sonos_app.token import SonosToken
 from sonos_app.data_store import PostgresDataStore
+
+
+class SonosReauthorizationRequired(RuntimeError):
+    pass
 
 
 class SonosClient:
@@ -37,6 +41,41 @@ class SonosClient:
 
         return await self._post_json(url)
 
+    async def _refresh_access_token(self):
+        latest = self.data_store.load_tokens()
+        if not latest or not latest.refresh_token:
+            raise SonosReauthorizationRequired(
+                "Sonos authorization is missing or expired. Start OAuth again."
+            )
+
+        try:
+            refreshed = await self.oauth_client.refresh_token(latest.refresh_token)
+        except SonosAuthTokenRefreshError as exc:
+            if exc.code in {400, 401, 403}:
+                self.data_store.clear_tokens()
+                raise SonosReauthorizationRequired(
+                    "Sonos rejected the saved refresh token. Start OAuth again."
+                ) from exc
+            raise
+
+        new_token = SonosToken(
+            access_token=refreshed["access_token"],
+            refresh_token=refreshed.get("refresh_token", latest.refresh_token),
+            expires_in=refreshed.get("expires_in"),
+            scope=refreshed.get("scope"),
+            updated_at=datetime.datetime.utcnow(),
+        )
+
+        self.data_store.save_tokens(
+            {
+                "access_token": new_token.access_token,
+                "refresh_token": new_token.refresh_token,
+                "expires_in": new_token.expires_in,
+                "scope": new_token.scope,
+            }
+        )
+        self.tokens = new_token
+
     async def _get_json(self, url: str) -> dict:
         async def do_get(token: SonosToken):
             headers = {
@@ -51,40 +90,13 @@ class SonosClient:
 
         # Refresh token on 401
         if resp.status_code == 401:
-            latest = self.data_store.load_tokens()
-            if not latest or not latest.refresh_token:
-                raise RuntimeError(
-                    "Sonos access token expired and no refresh_token found. Re-auth required."
-                )
-
-            refreshed = await self.oauth_client.refresh_token(
-                latest.refresh_token)
-
-            # Build new SonosToken
-            new_token = SonosToken(
-                access_token=refreshed["access_token"],
-                refresh_token=refreshed.get("refresh_token",
-                                            latest.refresh_token),
-                expires_in=refreshed.get("expires_in"),
-                scope=refreshed.get("scope"),
-                updated_at=datetime.datetime.now(),
-            )
-
-            # Persist
-            self.data_store.save_tokens(
-                {
-                    "access_token": new_token.access_token,
-                    "refresh_token": new_token.refresh_token,
-                    "expires_in": new_token.expires_in,
-                    "scope": new_token.scope,
-                }
-            )
-
-            # Update in-memory token
-            self.tokens = new_token
-
-            # Retry once
+            await self._refresh_access_token()
             resp = await do_get(self.tokens)
+
+        if resp.status_code == 401:
+            raise SonosReauthorizationRequired(
+                "Sonos rejected the refreshed access token. Start OAuth again."
+            )
 
         # Handle remaining errors
         if resp.status_code >= 400:
@@ -105,34 +117,13 @@ class SonosClient:
         resp = await do_post(self.tokens)
 
         if resp.status_code == 401:
-            latest = self.data_store.load_tokens()
-            if not latest or not latest.refresh_token:
-                raise RuntimeError(
-                    "Sonos access token expired and no refresh_token found. Re-auth required.")
-
-            refreshed = await self.oauth_client.refresh_token(
-                latest.refresh_token)
-
-            new_token = SonosToken(
-                access_token=refreshed["access_token"],
-                refresh_token=refreshed.get("refresh_token",
-                                            latest.refresh_token),
-                expires_in=refreshed.get("expires_in"),
-                scope=refreshed.get("scope"),
-                updated_at=datetime.datetime.utcnow(),
-            )
-
-            self.data_store.save_tokens(
-                {
-                    "access_token": new_token.access_token,
-                    "refresh_token": new_token.refresh_token,
-                    "expires_in": new_token.expires_in,
-                    "scope": new_token.scope,
-                }
-            )
-
-            self.tokens = new_token
+            await self._refresh_access_token()
             resp = await do_post(self.tokens)
+
+        if resp.status_code == 401:
+            raise SonosReauthorizationRequired(
+                "Sonos rejected the refreshed access token. Start OAuth again."
+            )
 
         if resp.status_code >= 400:
             raise RuntimeError(

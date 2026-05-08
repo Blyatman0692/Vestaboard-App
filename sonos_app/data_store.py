@@ -59,6 +59,18 @@ class PostgresDataStore:
             updated_at=updated_at.isoformat() if updated_at else None
         )
 
+    def clear_tokens(self):
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    delete from sonos_tokens
+                    where user_key = %s
+                    """,
+                    (self.user_key,),
+                )
+                conn.commit()
+
     def save_oauth_state(self, state: str):
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:

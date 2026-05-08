@@ -17,6 +17,12 @@ class SonosAuthTokenExchangeError(SonosAuthError):
         self.code = code
 
 
+class SonosAuthTokenRefreshError(SonosAuthError):
+    def __init__(self, message, code, body=None):
+        super().__init__(message)
+        self.code = code
+        self.body = body
+
 
 class SonosOAuthClient:
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str, data_store):
@@ -99,7 +105,10 @@ class SonosOAuthClient:
             )
 
         if resp.status_code != 200:
-            raise SonosAuthError(f"Refresh failed: {resp.status_code}")
+            raise SonosAuthTokenRefreshError(
+                "Refresh failed",
+                resp.status_code,
+                resp.text,
+            )
 
         return resp.json()
-
