@@ -18,35 +18,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _format_position(position: FlightPosition) -> str:
-    return (
-        f"{position.display_name:<8} "
-        f"{position.route:<7} "
-        f"{position.aircraft_type or '?':<4} "
-        f"alt={position.alt:<5} "
-        f"speed={position.gspeed:<3}kt "
-        f"src={position.source}"
-    )
-
-
-def _flight_number(position: FlightPosition) -> str:
-    return position.flight or position.callsign or position.fr24_id
-
-
-def _flight_route(position: FlightPosition) -> str:
-    origin = position.orig_iata or position.orig_icao or "?"
-    destination = position.dest_iata or position.dest_icao or "?"
-    return f"{origin} TO {destination}"
-
-
-def _speed_kmh(position: FlightPosition) -> int:
-    return round(position.gspeed * 1.852)
-
-
-def _altitude_meters(position: FlightPosition) -> int:
-    return round(position.alt * 0.3048)
-
-
 def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
     vbml_components = []
     
@@ -64,13 +35,13 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            _flight_number(position), 1, 11, "right", "top"
+            position.flight_number, 1, 11, "right", "top"
         )
     )
 
     vbml_components.append(
         utils.compose_vbml_component(
-            position.aircraft_type or "?", 1, 22, "left", "top"
+            position.aircraft_type_display, 1, 22, "left", "top"
         )
     )
 
@@ -82,7 +53,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            _flight_route(position), 1, 11, "right", "top"
+            position.route, 1, 11, "right", "top"
         )
     )
 
@@ -94,7 +65,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            f"{_speed_kmh(position)} kmh", 1, 11, "right", "top"
+            f"{position.speed_kmh} kmh", 1, 11, "right", "top"
         )
     )
 
@@ -106,7 +77,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            f"{_altitude_meters(position)} m", 1, 11, "right", "top"
+            f"{position.altitude_meters} m", 1, 11, "right", "top"
         )
     )
 
@@ -154,8 +125,8 @@ def run() -> None:
         return
 
     position = positions[0]
-    logger.info("Selected flight for Vestaboard: %s", _format_position(position))
-    print(_format_position(position))
+    logger.info("Selected flight for Vestaboard: %s", position.console_summary)
+    print(position.console_summary)
 
     _send_position_to_vestaboard(container, position)
     logger.info("Flight message sent successfully")

@@ -96,10 +96,37 @@ class FlightPosition:
         return self.flight or self.callsign or self.reg or self.fr24_id
 
     @property
+    def flight_number(self) -> str:
+        return self.flight or self.callsign or self.fr24_id
+
+    @property
+    def aircraft_type_display(self) -> str:
+        return self.aircraft_type or "?"
+
+    @property
     def route(self) -> str:
         origin = self.orig_iata or self.orig_icao or "?"
         destination = self.dest_iata or self.dest_icao or "?"
-        return f"{origin}->{destination}"
+        return f"{origin} TO {destination}"
+
+    @property
+    def speed_kmh(self) -> int:
+        return round(self.gspeed * 1.852)
+
+    @property
+    def altitude_meters(self) -> int:
+        return round(self.alt * 0.3048)
+
+    @property
+    def console_summary(self) -> str:
+        return (
+            f"{self.display_name:<8} "
+            f"{self.route:<7} "
+            f"{self.aircraft_type_display:<4} "
+            f"alt={self.alt:<5} "
+            f"speed={self.gspeed:<3}kt "
+            f"src={self.source}"
+        )
 
 
 class FlightRadarApiError(RuntimeError):
