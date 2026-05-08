@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, PlainTextResponse, JSONResponse
+import asyncio
 import base64
 import hashlib
 
@@ -7,6 +8,7 @@ from app import build_sonos_container
 from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
 from sonos_app.sonos_oauth_client import SonosAuthError
 from sonos_app.playback_metadata import parse_playback_metadata
+from sonos_app.subscription_renewer import PlaybackMetadataSubscriptionRenewer
 
 import logging
 
@@ -24,6 +26,8 @@ oauth_client = container.sonos_oauth_client
 db_client = container.postgres_data_store
 event_processor = container.sonos_event_processor
 sonos_config = container.config
+subscription_renewer = PlaybackMetadataSubscriptionRenewer(db_client, oauth_client)
+subscription_renewer_task: asyncio.Task | None = None
 
 
 def reauthorization_payload(request: Request, detail: str) -> dict[str, str | bool]:
@@ -50,6 +54,34 @@ def load_tokens_or_reauthorize():
             "No usable Sonos authorization was found. Start OAuth again."
         )
     return tokens
+
+
+@app.on_event("startup")
+async def start_subscription_renewer():
+    global subscription_renewer_task
+
+    if subscription_renewer_task and not subscription_renewer_task.done():
+        return
+
+    subscription_renewer_task = asyncio.create_task(
+        subscription_renewer.run_forever()
+    )
+
+
+@app.on_event("shutdown")
+async def stop_subscription_renewer():
+    global subscription_renewer_task
+
+    if not subscription_renewer_task:
+        return
+
+    subscription_renewer_task.cancel()
+    try:
+        await subscription_renewer_task
+    except asyncio.CancelledError:
+        pass
+    finally:
+        subscription_renewer_task = None
 
 
 @app.get("/health")
@@ -221,4 +253,22 @@ def sonos_subscriptions():
             "ok": True,
             "subscriptions": db_client.list_playback_metadata_subscriptions(),
         }
+    )
+
+
+@app.post("/sonos/subscriptions/renew")
+async def renew_sonos_subscriptions(request: Request):
+    result = await subscription_renewer.renew_due()
+
+    if result.get("reauthorization_required"):
+        payload = reauthorization_payload(
+            request,
+            result.get("detail", "Sonos reauthorization is required."),
+        )
+        payload.update(result)
+        return JSONResponse(status_code=401, content=payload)
+
+    return JSONResponse(
+        status_code=200 if result["ok"] else 502,
+        content=result,
     )

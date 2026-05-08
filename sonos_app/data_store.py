@@ -160,6 +160,46 @@ class PostgresDataStore:
             for group_id, namespace, active, created_at, updated_at, last_subscribed_at in rows
         ]
 
+    def list_due_playback_metadata_subscriptions(self, renew_after_seconds: int):
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_subscriptions_table(cur)
+                cur.execute(
+                    """
+                    select group_id,
+                           namespace,
+                           active,
+                           created_at,
+                           updated_at,
+                           last_subscribed_at
+                    from sonos_subscriptions
+                    where user_key = %s
+                      and namespace = %s
+                      and active = true
+                      and last_subscribed_at <= now() - (%s * interval '1 second')
+                    order by last_subscribed_at asc
+                    """,
+                    (
+                        self.user_key,
+                        PLAYBACK_METADATA_NAMESPACE,
+                        renew_after_seconds,
+                    ),
+                )
+                rows = cur.fetchall()
+                conn.commit()
+
+        return [
+            {
+                "group_id": group_id,
+                "namespace": namespace,
+                "active": active,
+                "created_at": self._isoformat(created_at),
+                "updated_at": self._isoformat(updated_at),
+                "last_subscribed_at": self._isoformat(last_subscribed_at),
+            }
+            for group_id, namespace, active, created_at, updated_at, last_subscribed_at in rows
+        ]
+
     def clear_tokens(self):
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
