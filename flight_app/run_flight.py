@@ -138,6 +138,10 @@ def _send_position_to_vestaboard(container, position: FlightPosition) -> None:
 def run() -> None:
     logger.info("Flight job started")
 
+    # Time gate: only run between 08:00–23:00 Pacific Time
+    if not utils.time_gate(logger, 8, 0, 23, 0):
+        return
+
     container = build_flight_container()
     bounds = container.config.bounds.to_fr24_bounds()
     limit = _get_limit()
