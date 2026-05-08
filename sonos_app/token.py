@@ -8,5 +8,4 @@ class SonosToken:
     refresh_token: str | None = None
     expires_in: int | None = None
     scope: str | None = None
-    updated_at: datetime.datetime | None = None
-
+    updated_at: datetime.datetime | str | None = None
