@@ -9,6 +9,17 @@ def _load_dotenv_if_needed(load_env: bool) -> None:
         load_dotenv(override=False)
 
 
+def _get_float_env(name: str, default: float) -> float:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    try:
+        return float(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float.") from exc
+
+
 @dataclass(frozen=True)
 class BoardConfig:
     vb_rw_api_key: str
@@ -40,4 +51,45 @@ class SonosConfig:
             client_secret=os.environ["SONOS_CLIENT_SECRET"],
             redirect_uri=os.environ["SONOS_REDIRECT_URI"],
             database_url=os.environ["DATABASE_URL"],
+        )
+
+
+@dataclass(frozen=True)
+class FlightBounds:
+    lat_min: float
+    lon_min: float
+    lat_max: float
+    lon_max: float
+
+    def __post_init__(self) -> None:
+        if self.lat_min > self.lat_max:
+            raise ValueError("FLIGHT_LAMIN must be less than or equal to FLIGHT_LAMAX.")
+        if self.lon_min > self.lon_max:
+            raise ValueError("FLIGHT_LOMIN must be less than or equal to FLIGHT_LOMAX.")
+
+    def to_fr24_bounds(self) -> str:
+        return f"{self.lat_max:.6f},{self.lat_min:.6f},{self.lon_min:.6f},{self.lon_max:.6f}"
+
+
+@dataclass(frozen=True)
+class FlightRadarConfig:
+    api_token: str
+    bounds: FlightBounds
+    base_url: str = "https://fr24api.flightradar24.com"
+    api_version: str = "v1"
+
+    @classmethod
+    def from_env(cls, *, load_env: bool = True) -> "FlightRadarConfig":
+        _load_dotenv_if_needed(load_env)
+
+        return cls(
+            api_token=os.environ["FR24_API_TOKEN"],
+            bounds=FlightBounds(
+                lat_min=_get_float_env("FLIGHT_LAMIN", 47.693460),
+                lon_min=_get_float_env("FLIGHT_LOMIN", -122.231550),
+                lat_max=_get_float_env("FLIGHT_LAMAX", 47.783530),
+                lon_max=_get_float_env("FLIGHT_LOMAX", -122.097800),
+            ),
+            base_url=os.environ.get("FR24_BASE_URL", cls.base_url),
+            api_version=os.environ.get("FR24_API_VERSION", cls.api_version),
         )
