@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 
 from app import build_flight_container
@@ -17,19 +16,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _get_limit() -> int:
-    raw_limit = os.environ.get("FLIGHT_LIMIT", "10")
-    try:
-        limit = int(raw_limit)
-    except ValueError as exc:
-        raise ValueError("FLIGHT_LIMIT must be an integer.") from exc
-
-    if limit <= 0:
-        raise ValueError("FLIGHT_LIMIT must be greater than 0.")
-
-    return limit
 
 
 def _format_position(position: FlightPosition) -> str:
@@ -144,17 +130,27 @@ def run() -> None:
 
     container = build_flight_container()
     bounds = container.config.bounds.to_fr24_bounds()
-    limit = _get_limit()
 
-    logger.info("Fetching FR24 live positions: bounds=%s limit=%d", bounds, limit)
-    positions = container.flight_radar_client.get_live_positions_full(
+    logger.info("Checking FR24 light live positions: bounds=%s limit=1", bounds)
+    light_positions = container.flight_radar_client.get_live_positions_light(
         bounds=bounds,
-        limit=limit,
+        limit=1,
     )
 
-    logger.info("Retrieved %d flight positions", len(positions))
+    logger.info("Retrieved %d light flight positions", len(light_positions))
+    if not light_positions:
+        logger.info("No flight positions retrieved; skipping full lookup and Vestaboard update")
+        return
+
+    logger.info("Fetching FR24 full live position details: bounds=%s limit=1", bounds)
+    positions = container.flight_radar_client.get_live_positions_full(
+        bounds=bounds,
+        limit=1,
+    )
+
+    logger.info("Retrieved %d full flight positions", len(positions))
     if not positions:
-        logger.info("No flight positions retrieved; skipping Vestaboard update")
+        logger.info("Light lookup found a flight, but full lookup returned none; skipping Vestaboard update")
         return
 
     position = positions[0]

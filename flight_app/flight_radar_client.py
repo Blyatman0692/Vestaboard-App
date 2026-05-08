@@ -7,6 +7,39 @@ import requests
 
 
 @dataclass(frozen=True)
+class FlightPositionLight:
+    fr24_id: str
+    hex: str | None
+    callsign: str | None
+    lat: float
+    lon: float
+    track: int
+    alt: int
+    gspeed: int
+    vspeed: int
+    squawk: str
+    timestamp: str
+    source: str
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> "FlightPositionLight":
+        return cls(
+            fr24_id=data["fr24_id"],
+            hex=data.get("hex"),
+            callsign=data.get("callsign"),
+            lat=float(data["lat"]),
+            lon=float(data["lon"]),
+            track=int(data["track"]),
+            alt=int(data["alt"]),
+            gspeed=int(data["gspeed"]),
+            vspeed=int(data["vspeed"]),
+            squawk=str(data["squawk"]),
+            timestamp=data["timestamp"],
+            source=data["source"],
+        )
+
+
+@dataclass(frozen=True)
 class FlightPosition:
     fr24_id: str
     flight: str | None
@@ -84,6 +117,7 @@ class FlightRadarApiError(RuntimeError):
 class FlightRadarClient:
     BASE_URL = "https://fr24api.flightradar24.com"
     LIVE_POSITIONS_FULL_PATH = "/api/live/flight-positions/full"
+    LIVE_POSITIONS_LIGHT_PATH = "/api/live/flight-positions/light"
 
     def __init__(
         self,
@@ -141,6 +175,88 @@ class FlightRadarClient:
         airspaces: str | None = None,
         gspeed: str | None = None,
     ) -> list[FlightPosition]:
+        params = self._build_live_positions_params(
+            bounds=bounds,
+            limit=limit,
+            flights=flights,
+            callsigns=callsigns,
+            registrations=registrations,
+            painted_as=painted_as,
+            operating_as=operating_as,
+            airports=airports,
+            routes=routes,
+            aircraft=aircraft,
+            altitude_ranges=altitude_ranges,
+            squawks=squawks,
+            categories=categories,
+            data_sources=data_sources,
+            airspaces=airspaces,
+            gspeed=gspeed,
+        )
+        payload = self._get_json(self.LIVE_POSITIONS_FULL_PATH, params=params)
+        return [FlightPosition.from_api(item) for item in payload.get("data", [])]
+
+    def get_live_positions_light(
+        self,
+        *,
+        bounds: str | None = None,
+        limit: int | None = None,
+        flights: str | None = None,
+        callsigns: str | None = None,
+        registrations: str | None = None,
+        painted_as: str | None = None,
+        operating_as: str | None = None,
+        airports: str | None = None,
+        routes: str | None = None,
+        aircraft: str | None = None,
+        altitude_ranges: str | None = None,
+        squawks: str | None = None,
+        categories: str | None = None,
+        data_sources: str | None = None,
+        airspaces: str | None = None,
+        gspeed: str | None = None,
+    ) -> list[FlightPositionLight]:
+        params = self._build_live_positions_params(
+            bounds=bounds,
+            limit=limit,
+            flights=flights,
+            callsigns=callsigns,
+            registrations=registrations,
+            painted_as=painted_as,
+            operating_as=operating_as,
+            airports=airports,
+            routes=routes,
+            aircraft=aircraft,
+            altitude_ranges=altitude_ranges,
+            squawks=squawks,
+            categories=categories,
+            data_sources=data_sources,
+            airspaces=airspaces,
+            gspeed=gspeed,
+        )
+        payload = self._get_json(self.LIVE_POSITIONS_LIGHT_PATH, params=params)
+        return [FlightPositionLight.from_api(item) for item in payload.get("data", [])]
+
+    @staticmethod
+    def _build_live_positions_params(
+        *,
+        bounds: str | None = None,
+        limit: int | None = None,
+        flights: str | None = None,
+        callsigns: str | None = None,
+        registrations: str | None = None,
+        painted_as: str | None = None,
+        operating_as: str | None = None,
+        airports: str | None = None,
+        routes: str | None = None,
+        aircraft: str | None = None,
+        altitude_ranges: str | None = None,
+        squawks: str | None = None,
+        categories: str | None = None,
+        data_sources: str | None = None,
+        airspaces: str | None = None,
+        gspeed: str | None = None,
+    ) -> dict[str, Any]:
         filters = {
             "bounds": bounds,
             "flights": flights,
@@ -168,8 +284,7 @@ class FlightRadarClient:
                 raise ValueError("FR24 live positions limit must be between 1 and 30000.")
             params["limit"] = limit
 
-        payload = self._get_json(self.LIVE_POSITIONS_FULL_PATH, params=params)
-        return [FlightPosition.from_api(item) for item in payload.get("data", [])]
+        return params
 
     def _get_json(self, path: str, *, params: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
