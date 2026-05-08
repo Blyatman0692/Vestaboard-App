@@ -124,6 +124,8 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
         )
     )
 
+    return utils.compose_vbml_payload(vbml_components)
+
 
 def _send_position_to_vestaboard(container, position: FlightPosition) -> None:
     vbml_payload = _compose_flight_vbml_payload(position)
