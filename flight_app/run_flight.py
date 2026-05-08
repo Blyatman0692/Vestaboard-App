@@ -92,6 +92,16 @@ def _send_position_to_vestaboard(container, position: FlightPosition) -> None:
     container.board.display_manager.send(msg)
 
 
+def _has_seen_flight(container, fr24_id: str) -> bool:
+    return container.board.redis_data_store.has_seen_flight(fr24_id)
+
+
+def _mark_flight_seen(container, fr24_id: str) -> None:
+    container.board.redis_data_store.mark_flight_seen(
+        fr24_id,
+    )
+
+
 def run() -> None:
     logger.info("Flight job started")
 
@@ -113,6 +123,11 @@ def run() -> None:
         logger.info("No flight positions retrieved; skipping full lookup and Vestaboard update")
         return
 
+    light_position = light_positions[0]
+    if _has_seen_flight(container, light_position.fr24_id):
+        logger.info("Flight %s already seen from light lookup; skipping full lookup", light_position.fr24_id)
+        return
+
     logger.info("Fetching FR24 full live position details: bounds=%s limit=1", bounds)
     positions = container.flight_radar_client.get_live_positions_full(
         bounds=bounds,
@@ -125,10 +140,15 @@ def run() -> None:
         return
 
     position = positions[0]
+    if _has_seen_flight(container, position.fr24_id):
+        logger.info("Flight %s already seen from full lookup; skipping Vestaboard update", position.fr24_id)
+        return
+
     logger.info("Selected flight for Vestaboard: %s", position.console_summary)
     print(position.console_summary)
 
     _send_position_to_vestaboard(container, position)
+    _mark_flight_seen(container, position.fr24_id)
     logger.info("Flight message sent successfully")
 
 
