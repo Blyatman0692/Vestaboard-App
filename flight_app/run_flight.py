@@ -3,6 +3,9 @@ import os
 import sys
 
 from app import build_flight_container
+from vestaboard import utils
+from vestaboard.board_message import BoardMessage
+from vestaboard.board_state import BoardState
 from flight_app.flight_radar_client import FlightPosition
 
 logging.basicConfig(
@@ -40,6 +43,96 @@ def _format_position(position: FlightPosition) -> str:
     )
 
 
+def _flight_number(position: FlightPosition) -> str:
+    return position.flight or position.callsign or position.fr24_id
+
+
+def _flight_route(position: FlightPosition) -> str:
+    origin = position.orig_iata or position.orig_icao or "?"
+    destination = position.dest_iata or position.dest_icao or "?"
+    return f"{origin} TO {destination}"
+
+
+def _speed_kmh(position: FlightPosition) -> int:
+    return round(position.gspeed * 1.852)
+
+
+def _altitude_meters(position: FlightPosition) -> int:
+    return round(position.alt * 0.3048)
+
+
+def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
+    vbml_components = []
+    
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "Flying over now", 1, 22, "left", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "FLIGHT", 1, 11, "left", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            _flight_number(position), 1, 11, "right", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            position.aircraft_type or "?", 1, 22, "left", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "ROUTE", 1, 11, "left", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            _flight_route(position), 1, 11, "right", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "SPEED", 1, 11, "left", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            f"{_speed_kmh(position)} kmh", 1, 11, "right", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "ALTITUDE", 1, 11, "left", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            f"{_altitude_meters(position)} m", 1, 11, "right", "top"
+        )
+    )
+
+
+def _send_position_to_vestaboard(container, position: FlightPosition) -> None:
+    vbml_payload = _compose_flight_vbml_payload(position)
+    vbml_layout = container.board.vestaboard_messenger.vbml_compose_layout(vbml_payload)
+
+    msg = BoardMessage(BoardState.FLIGHT, "flight_app", layout=vbml_layout)
+    container.board.display_manager.send(msg)
+
+
 def run() -> None:
     logger.info("Flight job started")
 
@@ -54,8 +147,16 @@ def run() -> None:
     )
 
     logger.info("Retrieved %d flight positions", len(positions))
-    for position in positions:
-        print(_format_position(position))
+    if not positions:
+        logger.info("No flight positions retrieved; skipping Vestaboard update")
+        return
+
+    position = positions[0]
+    logger.info("Selected flight for Vestaboard: %s", _format_position(position))
+    print(_format_position(position))
+
+    _send_position_to_vestaboard(container, position)
+    logger.info("Flight message sent successfully")
 
 
 if __name__ == "__main__":

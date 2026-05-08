@@ -24,6 +24,7 @@ class WeatherContainer:
 
 @dataclass(frozen=True)
 class FlightContainer:
+    board: BoardContainer
     config: FlightRadarConfig
     flight_radar_client: FlightRadarClient
 
@@ -64,7 +65,12 @@ def build_weather_container(board: BoardContainer | None = None) -> WeatherConta
     )
 
 
-def build_flight_container(config: FlightRadarConfig | None = None) -> FlightContainer:
+def build_flight_container(
+        *,
+        board: BoardContainer | None = None, 
+        config: FlightRadarConfig | None = None
+        ) -> FlightContainer:
+    board = board or build_board_container()
     config = config or FlightRadarConfig.from_env()
 
     flight_radar_client = FlightRadarClient(
@@ -74,6 +80,7 @@ def build_flight_container(config: FlightRadarConfig | None = None) -> FlightCon
     )
 
     return FlightContainer(
+        board=board,
         config=config,
         flight_radar_client=flight_radar_client,
     )
