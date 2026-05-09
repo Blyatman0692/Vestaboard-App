@@ -1,5 +1,7 @@
 import logging
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app import build_flight_container
 from vestaboard import utils
@@ -18,18 +20,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _flight_retrieved_header() -> str:
+    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+    time_label = now_pt.strftime("%I:%M%p").lstrip("0")
+    return f"{time_label}"
+
+
 def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
     vbml_components = []
     
     vbml_components.append(
         utils.compose_vbml_component(
-            "Flying over now", 1, 22, "left", "top"
+            "FLYING OVER @", 1, 14, "left", "top"
         )
     )
 
     vbml_components.append(
         utils.compose_vbml_component(
-            "FLIGHT", 1, 11, "left", "top"
+            _flight_retrieved_header(), 1, 8, "right", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "{65}FLIGHT", 1, 11, "left", "top"
         )
     )
 
@@ -41,13 +55,19 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            position.aircraft_type_display, 1, 22, "left", "top"
+            "{65}AIRCRAFT", 1, 11, "left", "top"
         )
     )
 
     vbml_components.append(
         utils.compose_vbml_component(
-            "ROUTE", 1, 11, "left", "top"
+            position.aircraft_type_display, 1, 11, "right", "top"
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "{65}ROUTE", 1, 11, "left", "top"
         )
     )
 
@@ -59,7 +79,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            "SPEED", 1, 11, "left", "top"
+            "{65}SPEED", 1, 11, "left", "top"
         )
     )
 
@@ -71,7 +91,7 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
 
     vbml_components.append(
         utils.compose_vbml_component(
-            "ALTITUDE", 1, 11, "left", "top"
+            "{65}ALTITUDE", 1, 11, "left", "top"
         )
     )
 
