@@ -5,6 +5,8 @@ from typing import Any
 
 import requests
 
+from flight_app.aircraft_type_lookup import aircraft_type_name
+
 
 @dataclass(frozen=True)
 class FlightPositionLight:
@@ -101,7 +103,11 @@ class FlightPosition:
 
     @property
     def aircraft_type_display(self) -> str:
-        return self.aircraft_type or "?"
+        return aircraft_type_name(self.aircraft_type) or self.aircraft_type or "?"
+
+    @property
+    def aircraft_type_board_display(self) -> str:
+        return self.aircraft_type_display[:21]
 
     @property
     def route(self) -> str:
