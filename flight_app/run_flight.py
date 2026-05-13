@@ -53,15 +53,16 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
         )
     )
 
+    # add the color block for aircraft type row
     vbml_components.append(
         utils.compose_vbml_component(
-            "{65}AIRCRAFT", 1, 11, "left", "top"
+            "{65}", 1, 1, "left", "top"
         )
     )
 
     vbml_components.append(
         utils.compose_vbml_component(
-            position.aircraft_type_display, 1, 11, "right", "top"
+            position.aircraft_type_board_display, 1, 21, "left", "top"
         )
     )
 
