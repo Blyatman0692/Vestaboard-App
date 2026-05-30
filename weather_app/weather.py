@@ -28,7 +28,9 @@ class DetailedWeather:
     feels_like: float
     uv_idx: float
     rain_chance_today: float
+    sunrise: datetime
     sunset: datetime
+    next_sunrise: datetime
     condition: str
     unit: str
 
@@ -97,8 +99,10 @@ class WeatherClient:
                 "temperature_2m_max",
                 "temperature_2m_min",
                 "uv_index_max",
+                "sunrise",
                 "sunset",
             ],
+            "forecast_days": 2,
             "temperature_unit": self.temp_unit,
             "windspeed_unit": self.wind_unit,
             "timezone": "auto",
@@ -118,11 +122,19 @@ class WeatherClient:
         high = float(daily.Variables(0).ValuesAsNumpy()[0])
         low = float(daily.Variables(1).ValuesAsNumpy()[0])
         uv_index = float(daily.Variables(2).ValuesAsNumpy()[0])
-        sunset_timestamp = int(daily.Variables(3).ValuesInt64AsNumpy()[0])
         local_timezone = timezone(timedelta(seconds=response.UtcOffsetSeconds()))
+        sunrise_timestamp = int(daily.Variables(3).ValuesInt64AsNumpy()[0])
+        sunset_timestamp = int(daily.Variables(4).ValuesInt64AsNumpy()[0])
+        next_sunrise_timestamp = int(daily.Variables(3).ValuesInt64AsNumpy()[1])
+        sunrise = datetime.fromtimestamp(sunrise_timestamp, timezone.utc).astimezone(
+            local_timezone
+        )
         sunset = datetime.fromtimestamp(sunset_timestamp, timezone.utc).astimezone(
             local_timezone
         )
+        next_sunrise = datetime.fromtimestamp(
+            next_sunrise_timestamp, timezone.utc
+        ).astimezone(local_timezone)
 
         # -------- Rain chance (derived) --------
         hourly = response.Hourly()
@@ -138,7 +150,9 @@ class WeatherClient:
             feels_like=feels_like,
             uv_idx=uv_index,
             rain_chance_today=rain_chance_today,
+            sunrise=sunrise,
             sunset=sunset,
+            next_sunrise=next_sunrise,
             condition=self._weathercode_to_text(weather_code),
             unit="C" if self.temp_unit == "celsius" else "F"
         )

@@ -64,6 +64,16 @@ def format_time(value: datetime) -> str:
     return f"{value.hour:02d}:{value.minute:02d}"
 
 
+def select_solar_event(detailed, now: Optional[datetime] = None) -> tuple[str, datetime]:
+    local_now = now or datetime.now(detailed.sunrise.tzinfo)
+
+    if local_now < detailed.sunrise:
+        return "RISE ", detailed.sunrise
+    if local_now < detailed.sunset:
+        return "SET ", detailed.sunset
+    return "RISE ", detailed.next_sunrise
+
+
 def run():
     logger.info("Detailed weather job started")
 
@@ -78,6 +88,7 @@ def run():
     manager = container.board.display_manager
 
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
+    solar_label, solar_time = select_solar_event(detailed)
 
     vbml_components = []
     for hc in weather_header.compose_header_components():
@@ -155,7 +166,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("SET ", format_time(detailed.sunset)),
+            format_string(solar_label, format_time(solar_time)),
             justify="right",
             align="top",
             height=1,
