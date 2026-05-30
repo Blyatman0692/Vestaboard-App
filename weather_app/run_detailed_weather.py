@@ -89,7 +89,7 @@ def run():
             justify="left",
             align="top",
             height=1,
-            width=11
+            width=7
         )
     )
 
@@ -99,7 +99,7 @@ def run():
             justify="right",
             align="top",
             height=1,
-            width=11
+            width=15
         )
     )
 
@@ -155,7 +155,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("MIN ", detailed.temp_min, detailed.unit),
+            format_string("SET ", format_time(detailed.sunset)),
             justify="right",
             align="top",
             height=1,
@@ -165,13 +165,14 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("SET ", format_time(detailed.sunset)),
+            format_string("MIN ", detailed.temp_min, detailed.unit),
             justify="left",
             align="top",
             height=1,
             width=11
         )
     )
+
 
     vbml_payload = utils.compose_vbml_payload(vbml_components)
     logger.debug("VBML payload prepared")
