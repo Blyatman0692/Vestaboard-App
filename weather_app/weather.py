@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from retry_requests import retry
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import requests
 import openmeteo_requests
 import requests_cache
@@ -28,6 +28,7 @@ class DetailedWeather:
     feels_like: float
     uv_idx: float
     rain_chance_today: float
+    sunset: datetime
     condition: str
     unit: str
 
@@ -117,6 +118,11 @@ class WeatherClient:
         high = float(daily.Variables(0).ValuesAsNumpy()[0])
         low = float(daily.Variables(1).ValuesAsNumpy()[0])
         uv_index = float(daily.Variables(2).ValuesAsNumpy()[0])
+        sunset_timestamp = int(daily.Variables(3).ValuesInt64AsNumpy()[0])
+        local_timezone = timezone(timedelta(seconds=response.UtcOffsetSeconds()))
+        sunset = datetime.fromtimestamp(sunset_timestamp, timezone.utc).astimezone(
+            local_timezone
+        )
 
         # -------- Rain chance (derived) --------
         hourly = response.Hourly()
@@ -132,6 +138,7 @@ class WeatherClient:
             feels_like=feels_like,
             uv_idx=uv_index,
             rain_chance_today=rain_chance_today,
+            sunset=sunset,
             condition=self._weathercode_to_text(weather_code),
             unit="C" if self.temp_unit == "celsius" else "F"
         )

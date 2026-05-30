@@ -1,5 +1,6 @@
 import logging
 import sys
+from datetime import datetime
 from typing import Optional
 
 from app import build_weather_container
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def format_string(
     label: str,
-    value: float,
+    value: float | str,
     unit: Optional[str] = None,
     precision: Optional[int] = None,
 ) -> str:
@@ -32,6 +33,7 @@ def format_string(
       None  -> default 1 decimal
       0     -> integer (100.0 -> 100)
       N     -> N decimals
+      str   -> used as-is
     """
     total_width = 10
     label_width = 5
@@ -39,14 +41,16 @@ def format_string(
 
     label_fixed = f"{label:<{label_width}}"[:label_width]
 
-    p = 1 if precision is None else precision
-
-    rounded = round(float(value), p)
-
-    if p == 0:
-        value_core = f"{int(rounded)}"
+    if isinstance(value, str):
+        value_core = value
     else:
-        value_core = f"{rounded:.{p}f}"
+        p = 1 if precision is None else precision
+        rounded = round(float(value), p)
+
+        if p == 0:
+            value_core = f"{int(rounded)}"
+        else:
+            value_core = f"{rounded:.{p}f}"
 
     value_str = f"{value_core}{unit}" if unit else value_core
 
@@ -55,6 +59,9 @@ def format_string(
 
     return f"{label_fixed}{value_str:>{value_width}}"
 
+
+def format_time(value: datetime) -> str:
+    return f"{value.hour:02d}:{value.minute:02d}"
 
 
 def run():
@@ -82,17 +89,7 @@ def run():
             justify="left",
             align="top",
             height=1,
-            width=5
-        )
-    )
-
-    vbml_components.append(
-        utils.compose_vbml_component(
-            "",
-            justify="left",
-            align="top",
-            height=1,
-            width=2
+            width=11
         )
     )
 
@@ -102,7 +99,7 @@ def run():
             justify="right",
             align="top",
             height=1,
-            width=15
+            width=11
         )
     )
 
@@ -152,17 +149,27 @@ def run():
             justify="left",
             align="top",
             height=1,
-            width=22
+            width=11
         )
     )
 
     vbml_components.append(
         utils.compose_vbml_component(
             format_string("MIN ", detailed.temp_min, detailed.unit),
+            justify="right",
+            align="top",
+            height=1,
+            width=11
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            format_string("SET ", format_time(detailed.sunset)),
             justify="left",
             align="top",
             height=1,
-            width=22
+            width=11
         )
     )
 
