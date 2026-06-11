@@ -1,3 +1,5 @@
+import os
+
 from redis_data_store import RedisDataStore, BoardDisplayRecord
 from vestaboard.board_message import BoardMessage
 from vestaboard.transitions import Transition, TransitionSpeed
@@ -38,6 +40,12 @@ class DisplayManager:
 
     @staticmethod
     def _decide_transition(prev_record: BoardDisplayRecord, next_message: BoardMessage):
+        fancy_transitions_enabled = (
+            os.environ.get("FANCY_TRANSITIONS", "true").strip().lower() != "false"
+        )
+        if not fancy_transitions_enabled:
+            return Transition.CLASSIC, TransitionSpeed.FAST
+
         if prev_record.state != next_message.state:
             return Transition.CURTAIN, TransitionSpeed.FAST
 
