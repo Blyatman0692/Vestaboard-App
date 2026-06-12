@@ -12,6 +12,7 @@ class MassiveConfigTests(unittest.TestCase):
             {
                 "MASSIVE_API_KEY": "secret",
                 "MASSIVE_BASE_URL": "https://example.test/",
+                "STOCK_TICKERS": " aapl, msft, AAPL ",
             },
             clear=True,
         ):
@@ -19,6 +20,7 @@ class MassiveConfigTests(unittest.TestCase):
 
         self.assertEqual(config.api_key, "secret")
         self.assertEqual(config.base_url, "https://example.test/")
+        self.assertEqual(config.tickers, ("AAPL", "MSFT"))
 
 
 class StockContainerTests(unittest.TestCase):

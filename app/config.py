@@ -20,6 +20,23 @@ def _get_float_env(name: str, default: float) -> float:
         raise ValueError(f"{name} must be a float.") from exc
 
 
+def _get_csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    values = tuple(
+        dict.fromkeys(
+            value.strip().upper()
+            for value in raw_value.split(",")
+            if value.strip()
+        )
+    )
+    if not values:
+        raise ValueError(f"{name} must include at least one value.")
+    return values
+
+
 @dataclass(frozen=True)
 class BoardConfig:
     vb_rw_api_key: str
@@ -99,6 +116,7 @@ class FlightRadarConfig:
 class MassiveConfig:
     api_key: str
     base_url: str = "https://api.massive.com"
+    tickers: tuple[str, ...] = ("MSFT", "TQQQ", "RIVN")
 
     @classmethod
     def from_env(cls, *, load_env: bool = True) -> "MassiveConfig":
@@ -106,5 +124,6 @@ class MassiveConfig:
 
         return cls(
             api_key=os.environ["MASSIVE_API_KEY"],
+            tickers=_get_csv_env("STOCK_TICKERS", cls.tickers),
             base_url=os.environ.get("MASSIVE_BASE_URL", cls.base_url),
         )
