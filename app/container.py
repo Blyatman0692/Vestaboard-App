@@ -1,8 +1,14 @@
 from dataclasses import dataclass
 
-from app.config import BoardConfig, FlightRadarConfig, SonosConfig
+from app.config import (
+    BoardConfig,
+    FlightRadarConfig,
+    MassiveConfig,
+    SonosConfig,
+)
 from flight_app.flight_radar_client import FlightRadarClient
 from redis_data_store import RedisDataStore
+from stock_app.massive_client import MassiveClient
 from vestaboard.display_manager import DisplayManager
 from vestaboard.vestaboard import VestaboardMessenger
 from weather_app.weather import WeatherClient
@@ -27,6 +33,13 @@ class FlightContainer:
     board: BoardContainer
     config: FlightRadarConfig
     flight_radar_client: FlightRadarClient
+
+
+@dataclass(frozen=True)
+class StockContainer:
+    board: BoardContainer
+    config: MassiveConfig
+    massive_client: MassiveClient
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,24 @@ def build_flight_container(
         board=board,
         config=config,
         flight_radar_client=flight_radar_client,
+    )
+
+
+def build_stock_container(
+    *,
+    board: BoardContainer | None = None,
+    config: MassiveConfig | None = None,
+) -> StockContainer:
+    board = board or build_board_container()
+    config = config or MassiveConfig.from_env()
+
+    return StockContainer(
+        board=board,
+        config=config,
+        massive_client=MassiveClient(
+            api_key=config.api_key,
+            base_url=config.base_url,
+        ),
     )
 
 

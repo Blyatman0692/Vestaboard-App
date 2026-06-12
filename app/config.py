@@ -93,3 +93,18 @@ class FlightRadarConfig:
             base_url=os.environ.get("FR24_BASE_URL", cls.base_url),
             api_version=os.environ.get("FR24_API_VERSION", cls.api_version),
         )
+
+
+@dataclass(frozen=True)
+class MassiveConfig:
+    api_key: str
+    base_url: str = "https://api.massive.com"
+
+    @classmethod
+    def from_env(cls, *, load_env: bool = True) -> "MassiveConfig":
+        _load_dotenv_if_needed(load_env)
+
+        return cls(
+            api_key=os.environ["MASSIVE_API_KEY"],
+            base_url=os.environ.get("MASSIVE_BASE_URL", cls.base_url),
+        )
