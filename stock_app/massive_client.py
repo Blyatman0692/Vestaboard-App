@@ -1,8 +1,10 @@
 import random
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -83,6 +85,112 @@ class TickerSnapshot:
         return None
 
 
+@dataclass(frozen=True)
+class StockPrice:
+    ticker: str
+    latest_price: float | None
+    previous_close: float | None
+    day: AggregateBar | None
+    as_of_timestamp_ms: int | None
+    is_end_of_day: bool = False
+
+    @classmethod
+    def from_snapshot(cls, snapshot: TickerSnapshot) -> "StockPrice":
+        return cls(
+            ticker=snapshot.ticker,
+            latest_price=snapshot.latest_price,
+            previous_close=(
+                snapshot.previous_day.close
+                if snapshot.previous_day is not None
+                else None
+            ),
+            day=snapshot.day,
+            as_of_timestamp_ms=cls._snapshot_timestamp_ms(snapshot),
+        )
+
+    @classmethod
+    def from_daily_bars(
+        cls,
+        ticker: str,
+        bars: list[AggregateBar],
+    ) -> "StockPrice | None":
+        if not bars:
+            return None
+
+        latest_bar = bars[0]
+        previous_close = bars[1].close if len(bars) > 1 else None
+        return cls(
+            ticker=ticker,
+            latest_price=latest_bar.close,
+            previous_close=previous_close,
+            day=latest_bar,
+            as_of_timestamp_ms=latest_bar.timestamp_ms,
+            is_end_of_day=True,
+        )
+
+    @property
+    def price_change(self) -> float | None:
+        if self.latest_price is None or self.previous_close is None:
+            return None
+        return self.latest_price - self.previous_close
+
+    @property
+    def price_change_percent(self) -> float | None:
+        if self.price_change is None or self.previous_close in {None, 0}:
+            return None
+        return (self.price_change / self.previous_close) * 100
+
+    @property
+    def console_summary(self) -> str:
+        return (
+            f"{self.ticker:<6} "
+            f"price={self._format_money(self.latest_price)} "
+            f"change={self._format_price_change()} "
+            f"prev_close={self._format_money(self.previous_close)} "
+            f"high={self._format_money(self.day.high if self.day else None)} "
+            f"low={self._format_money(self.day.low if self.day else None)} "
+            f"volume={self._format_volume(self.day.volume if self.day else None)} "
+            f"as_of={self._format_as_of()}"
+        )
+
+    @staticmethod
+    def _snapshot_timestamp_ms(snapshot: TickerSnapshot) -> int | None:
+        if snapshot.updated_ns is not None:
+            return snapshot.updated_ns // 1_000_000
+        if snapshot.minute is not None:
+            return snapshot.minute.timestamp_ms
+        if snapshot.day is not None:
+            return snapshot.day.timestamp_ms
+        return None
+
+    def _format_price_change(self) -> str:
+        if self.price_change is None:
+            return "N/A"
+        if self.price_change_percent is None:
+            return f"{self.price_change:+,.2f}"
+        return f"{self.price_change:+,.2f} ({self.price_change_percent:+.2f}%)"
+
+    def _format_as_of(self) -> str:
+        if self.as_of_timestamp_ms is None:
+            return "N/A"
+
+        as_of = datetime.fromtimestamp(
+            self.as_of_timestamp_ms / 1000,
+            ZoneInfo("America/New_York"),
+        )
+        if self.is_end_of_day:
+            return as_of.strftime("%Y-%m-%d EOD ET")
+        return as_of.strftime("%Y-%m-%d %H:%M ET")
+
+    @staticmethod
+    def _format_money(value: float | None) -> str:
+        return "N/A" if value is None else f"${value:,.2f}"
+
+    @staticmethod
+    def _format_volume(value: float | None) -> str:
+        return "N/A" if value is None else f"{value:,.0f}"
+
+
 class MassiveApiError(RuntimeError):
     def __init__(
         self,
@@ -105,6 +213,7 @@ class MassiveClient:
     BASE_URL = "https://api.massive.com"
     SNAPSHOT_PATH = "/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}"
     PREVIOUS_DAY_PATH = "/v2/aggs/ticker/{ticker}/prev"
+    DAILY_BARS_PATH = "/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
 
     def __init__(
         self,
@@ -172,6 +281,43 @@ class MassiveClient:
                 request_id=payload.get("request_id"),
             )
         return AggregateBar.from_api(results[0]) if results else None
+
+    def get_daily_bars(
+        self,
+        ticker: str,
+        *,
+        from_date: str,
+        to_date: str,
+        adjusted: bool = True,
+        sort: str = "desc",
+        limit: int = 2,
+    ) -> list[AggregateBar]:
+        ticker = self._normalize_ticker(ticker)
+        if sort not in {"asc", "desc"}:
+            raise ValueError("Massive daily bars sort must be 'asc' or 'desc'.")
+        if limit < 1 or limit > 50000:
+            raise ValueError("Massive daily bars limit must be between 1 and 50000.")
+
+        payload = self._get_json(
+            self.DAILY_BARS_PATH.format(
+                ticker=quote(ticker, safe=""),
+                from_date=quote(from_date, safe=""),
+                to_date=quote(to_date, safe=""),
+            ),
+            params={
+                "adjusted": str(adjusted).lower(),
+                "sort": sort,
+                "limit": limit,
+            },
+        )
+        results = payload.get("results") or []
+        if not isinstance(results, list):
+            raise MassiveApiError(
+                200,
+                f"Daily bars response had invalid results for {ticker}.",
+                request_id=payload.get("request_id"),
+            )
+        return [AggregateBar.from_api(result) for result in results]
 
     @staticmethod
     def _normalize_ticker(ticker: str) -> str:

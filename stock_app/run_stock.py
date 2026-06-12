@@ -1,8 +1,12 @@
 import logging
 import sys
+from datetime import date, timedelta
 
 from app import build_stock_container
-from stock_app.massive_client import AggregateBar
+from stock_app.massive_client import (
+    MassiveApiError,
+    StockPrice,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,35 +19,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _format_money(value: float | None) -> str:
-    return "N/A" if value is None else f"${value:,.2f}"
-
-
-def _format_volume(value: float | None) -> str:
-    return "N/A" if value is None else f"{value:,.0f}"
-
-
-def _format_day_change(bar: AggregateBar) -> str:
-    if bar.open is None or bar.close is None:
-        return "N/A"
-
-    change = bar.close - bar.open
-    if bar.open == 0:
-        return f"{change:+,.2f}"
-
-    change_percent = (change / bar.open) * 100
-    return f"{change:+,.2f} ({change_percent:+.2f}%)"
-
-
-def format_stock_summary(ticker: str, bar: AggregateBar) -> str:
-    return (
-        f"{ticker:<6} "
-        f"close={_format_money(bar.close)} "
-        f"change={_format_day_change(bar)} "
-        f"high={_format_money(bar.high)} "
-        f"low={_format_money(bar.low)} "
-        f"volume={_format_volume(bar.volume)}"
+def _get_latest_daily_price(container, ticker: str) -> StockPrice | None:
+    to_date = date.today()
+    from_date = to_date - timedelta(days=14)
+    bars = container.massive_client.get_daily_bars(
+        ticker,
+        from_date=from_date.isoformat(),
+        to_date=to_date.isoformat(),
+        sort="desc",
+        limit=2,
     )
+    return StockPrice.from_daily_bars(ticker, bars)
+
+
+def _get_stock_price(container, ticker: str) -> StockPrice | None:
+    try:
+        snapshot = container.massive_client.get_ticker_snapshot(ticker)
+        return StockPrice.from_snapshot(snapshot)
+    except MassiveApiError as exc:
+        if exc.status_code != 403:
+            raise
+
+        logger.warning(
+            "Ticker snapshot unavailable for %s; using latest available daily bars",
+            ticker,
+        )
+        return _get_latest_daily_price(container, ticker)
 
 
 def run() -> None:
@@ -52,19 +53,18 @@ def run() -> None:
     container = build_stock_container()
 
     for ticker in container.config.tickers:
-        logger.info("Fetching Massive previous-day bar: ticker=%s", ticker)
+        logger.info("Fetching latest Massive stock price: ticker=%s", ticker)
         try:
-            bar = container.massive_client.get_previous_day_bar(ticker)
+            stock_price = _get_stock_price(container, ticker)
         except Exception:
             logger.exception("Error retrieving stock info: ticker=%s", ticker)
             raise
 
-        if bar is None:
-            logger.warning("No previous-day stock data returned: ticker=%s", ticker)
+        if stock_price is None:
+            logger.warning("No stock price data returned: ticker=%s", ticker)
             continue
 
-        summary = format_stock_summary(ticker, bar)
-        logger.info("Retrieved stock info: %s", summary)
+        logger.info("Retrieved stock info: %s", stock_price.console_summary)
 
 
 if __name__ == "__main__":
