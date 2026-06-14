@@ -7,6 +7,9 @@ from stock_app.massive_client import (
     MassiveApiError,
     StockPrice,
 )
+from vestaboard import utils
+from vestaboard.board_message import BoardMessage
+from vestaboard.board_state import BoardState
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,6 +20,55 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _compose_stock_vbml_payload(stock_prices: list[StockPrice]) -> dict:
+    vbml_components = []
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            "{68}{68}MOST RECENT MARKET{68}{68}",
+            justify="center",
+            align="top",
+            width=22,
+            height=1
+        )
+    )
+
+    for _stock_price in stock_prices:
+        # Placeholder until the stock row content and layout parameters are defined.
+        vbml_components.append(
+            utils.compose_vbml_component(
+                f"{_stock_price.ticker}", 1, 4, "left", "top"
+            )
+        )
+
+        vbml_components.append(
+            utils.compose_vbml_component(
+                f"{_stock_price.latest_price}", 1, 10, "right", "top"
+            )
+        )
+
+        vbml_components.append(
+            utils.compose_vbml_component(
+                f"{_stock_price.price_change_percent}", 1, 8, "right", "top"
+            )
+        )
+
+    return utils.compose_vbml_payload(vbml_components)
+
+
+def _send_prices_to_vestaboard(
+    container,
+    stock_prices: list[StockPrice],
+) -> None:
+    vbml_payload = _compose_stock_vbml_payload(stock_prices)
+    vbml_layout = container.board.vestaboard_messenger.vbml_compose_layout(
+        vbml_payload
+    )
+
+    message = BoardMessage(BoardState.STOCK, "stock_app", layout=vbml_layout)
+    container.board.display_manager.send(message)
 
 
 def _get_latest_daily_price(container, ticker: str) -> StockPrice | None:
@@ -50,7 +102,12 @@ def _get_stock_price(container, ticker: str) -> StockPrice | None:
 def run() -> None:
     logger.info("Stock job started")
 
+    # Time gate: only run between 13:00–20:00 Pacific Time
+    if not utils.time_gate(logger, 13, 0, 20, 0):
+        return
+
     container = build_stock_container()
+    stock_prices: list[StockPrice] = []
 
     for ticker in container.config.tickers:
         logger.info("Fetching latest Massive stock price: ticker=%s", ticker)
@@ -65,6 +122,18 @@ def run() -> None:
             continue
 
         logger.info("Retrieved stock info: %s", stock_price.console_summary)
+        stock_prices.append(stock_price)
+
+    if not stock_prices:
+        logger.warning("No stock prices retrieved; skipping Vestaboard update")
+        return
+
+    try:
+        _send_prices_to_vestaboard(container, stock_prices)
+        logger.info("Stock message sent successfully")
+    except Exception:
+        logger.exception("Error sending stock message")
+        raise
 
 
 if __name__ == "__main__":
