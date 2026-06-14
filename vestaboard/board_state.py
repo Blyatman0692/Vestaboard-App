@@ -5,4 +5,5 @@ class BoardState(Enum):
     COUNTDOWN = "countdown"
     FLIGHT = "flight"
     SONOS = "sonos"
+    STOCK = "stock"
     UNKNOWN = "unknown"
