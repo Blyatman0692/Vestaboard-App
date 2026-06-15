@@ -165,14 +165,14 @@ class StockPrice:
 
     def _format_price_change(self) -> str:
         if self.price_change is None:
-            return "N/A"
+            return "NA"
         if self.price_change_percent is None:
             return f"{self.price_change:+,.2f}"
         return f"{self.price_change:+,.2f} ({self.price_change_percent:+.2f}%)"
 
     def _format_as_of(self) -> str:
         if self.as_of_timestamp_ms is None:
-            return "N/A"
+            return "NA"
 
         as_of = datetime.fromtimestamp(
             self.as_of_timestamp_ms / 1000,
@@ -184,11 +184,11 @@ class StockPrice:
 
     @staticmethod
     def _format_money(value: float | None) -> str:
-        return "N/A" if value is None else f"${value:,.2f}"
+        return "NA" if value is None else f"${value:,.2f}"
 
     @staticmethod
     def _format_volume(value: float | None) -> str:
-        return "N/A" if value is None else f"{value:,.0f}"
+        return "NA" if value is None else f"{value:,.0f}"
 
 
 class MassiveApiError(RuntimeError):
