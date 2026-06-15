@@ -45,13 +45,13 @@ def _compose_stock_vbml_payload(stock_prices: list[StockPrice]) -> dict:
 
         vbml_components.append(
             utils.compose_vbml_component(
-                f"{_stock_price.latest_price}", 1, 10, "right", "top"
+                f"{_stock_price._format_money(_stock_price.latest_price)}", 1, 10, "right", "top"
             )
         )
 
         vbml_components.append(
             utils.compose_vbml_component(
-                f"{_stock_price.price_change_percent}", 1, 8, "right", "top"
+                f"{_stock_price._format_price_change()}", 1, 8, "right", "top"
             )
         )
 
