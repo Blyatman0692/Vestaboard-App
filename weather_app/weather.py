@@ -29,6 +29,7 @@ class CurrentConditions:
     temperature: float
     apparent_temperature: float
     condition: str
+    uv_index: float | None
     us_aqi: int | None
 
 
@@ -108,6 +109,7 @@ class WeatherClient:
                 "temperature_2m",
                 "apparent_temperature",
                 "weather_code",
+                "uv_index",
             ],
             "daily": [
                 "temperature_2m_max",
@@ -131,6 +133,7 @@ class WeatherClient:
         temperature = current.Variables(0).Value()
         feels_like = current.Variables(1).Value()
         weather_code = int(current.Variables(2).Value())
+        current_uv_index = float(current.Variables(3).Value())
 
         # -------- Daily --------
         daily = response.Daily()
@@ -156,6 +159,9 @@ class WeatherClient:
             temperature=float(temperature),
             apparent_temperature=float(feels_like),
             condition=self._weathercode_to_text(weather_code),
+            uv_index=(
+                None if math.isnan(current_uv_index) else current_uv_index
+            ),
             us_aqi=us_aqi,
         )
         today = DailyForecast(

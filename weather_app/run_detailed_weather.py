@@ -140,7 +140,12 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("UVI ", detailed.today.maximum_uv_index),
+            format_string(
+                "UVI ",
+                detailed.current.uv_index
+                if detailed.current.uv_index is not None
+                else "--",
+            ),
             justify="right",
             align="top",
             height=1,

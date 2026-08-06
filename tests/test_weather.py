@@ -40,6 +40,7 @@ class WeatherClientTests(unittest.TestCase):
         self.assertEqual(detailed.current.temperature, 72.5)
         self.assertEqual(detailed.current.apparent_temperature, 71.25)
         self.assertEqual(detailed.current.condition, "PARTLY CLOUDY")
+        self.assertEqual(detailed.current.uv_index, 3.2)
         self.assertEqual(detailed.current.us_aqi, 42)
         self.assertEqual(detailed.today.maximum_temperature, 78.0)
         self.assertEqual(detailed.today.minimum_temperature, 58.0)
@@ -65,6 +66,7 @@ class WeatherClientTests(unittest.TestCase):
                             "temperature_2m",
                             "apparent_temperature",
                             "weather_code",
+                            "uv_index",
                         ],
                         "daily": [
                             "temperature_2m_max",
@@ -118,7 +120,7 @@ class WeatherClientTests(unittest.TestCase):
 
     @staticmethod
     def _weather_response() -> Mock:
-        current_values = [72.5, 71.25, 2]
+        current_values = [72.5, 71.25, 2, 3.2]
         daily_values = [
             Values([78.0, 79.0]),
             Values([58.0, 59.0]),
