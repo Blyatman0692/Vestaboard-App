@@ -20,19 +20,29 @@ class WeatherNow:
     wind_unit: str
 
 @dataclass(frozen=True)
-class DetailedWeather:
-    city: str
-    temp_now: float
-    temp_max: float
-    temp_min: float
-    feels_like: float
-    uv_idx: float
-    rain_chance_today: float
+class CurrentConditions:
+    temperature: float
+    apparent_temperature: float
+    condition: str
+
+
+@dataclass(frozen=True)
+class DailyForecast:
+    maximum_temperature: float
+    minimum_temperature: float
+    maximum_uv_index: float
+    maximum_precipitation_probability: float
     sunrise: datetime
     sunset: datetime
     next_sunrise: datetime
-    condition: str
-    unit: str
+
+
+@dataclass(frozen=True)
+class DetailedWeather:
+    city: str
+    current: CurrentConditions
+    today: DailyForecast
+    temperature_unit: str
 
 
 class WeatherClient:
@@ -142,19 +152,26 @@ class WeatherClient:
 
         rain_chance_today = float(rain_probs[:24].max())
 
-        detailed = DetailedWeather(
-            city=city,
-            temp_now=temperature,
-            temp_max=high,
-            temp_min=low,
-            feels_like=feels_like,
-            uv_idx=uv_index,
-            rain_chance_today=rain_chance_today,
+        current_conditions = CurrentConditions(
+            temperature=float(temperature),
+            apparent_temperature=float(feels_like),
+            condition=self._weathercode_to_text(weather_code),
+        )
+        today = DailyForecast(
+            maximum_temperature=high,
+            minimum_temperature=low,
+            maximum_uv_index=uv_index,
+            maximum_precipitation_probability=rain_chance_today,
             sunrise=sunrise,
             sunset=sunset,
             next_sunrise=next_sunrise,
-            condition=self._weathercode_to_text(weather_code),
-            unit="C" if self.temp_unit == "celsius" else "F"
+        )
+
+        detailed = DetailedWeather(
+            city=city,
+            current=current_conditions,
+            today=today,
+            temperature_unit="C" if self.temp_unit == "celsius" else "F",
         )
 
         return detailed
