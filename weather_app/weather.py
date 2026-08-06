@@ -1,3 +1,5 @@
+import logging
+import math
 import os
 import time
 import random
@@ -10,6 +12,9 @@ import openmeteo_requests
 import requests_cache
 
 from weather_app.cities import CITY_COORDS
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class WeatherNow:
@@ -24,6 +29,7 @@ class CurrentConditions:
     temperature: float
     apparent_temperature: float
     condition: str
+    us_aqi: int | None
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,7 @@ class WeatherClient:
     """
 
     BASE_URL = "https://api.open-meteo.com/v1/forecast"
+    AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
     def __init__(
         self,
@@ -94,7 +101,7 @@ class WeatherClient:
         time.sleep(backoff + jitter)
 
     def get_detailed_weather(self, city: str, lat, lon) -> DetailedWeather:
-        params = {
+        weather_params = {
             "latitude": lat,
             "longitude": lon,
             "current": [
@@ -102,24 +109,22 @@ class WeatherClient:
                 "apparent_temperature",
                 "weather_code",
             ],
-            "hourly": [
-                "precipitation_probability",
-            ],
             "daily": [
                 "temperature_2m_max",
                 "temperature_2m_min",
                 "uv_index_max",
+                "precipitation_probability_max",
                 "sunrise",
                 "sunset",
             ],
             "forecast_days": 2,
             "temperature_unit": self.temp_unit,
-            "windspeed_unit": self.wind_unit,
             "timezone": "auto",
         }
 
-        responses = self.client.weather_api(self.BASE_URL, params=params)
+        responses = self.client.weather_api(self.BASE_URL, params=weather_params)
         response = responses[0]
+        us_aqi = self._get_current_us_aqi(lat, lon)
 
         # -------- Current --------
         current = response.Current()
@@ -132,10 +137,11 @@ class WeatherClient:
         high = float(daily.Variables(0).ValuesAsNumpy()[0])
         low = float(daily.Variables(1).ValuesAsNumpy()[0])
         uv_index = float(daily.Variables(2).ValuesAsNumpy()[0])
+        rain_chance_today = float(daily.Variables(3).ValuesAsNumpy()[0])
         local_timezone = timezone(timedelta(seconds=response.UtcOffsetSeconds()))
-        sunrise_timestamp = int(daily.Variables(3).ValuesInt64AsNumpy()[0])
-        sunset_timestamp = int(daily.Variables(4).ValuesInt64AsNumpy()[0])
-        next_sunrise_timestamp = int(daily.Variables(3).ValuesInt64AsNumpy()[1])
+        sunrise_timestamp = int(daily.Variables(4).ValuesInt64AsNumpy()[0])
+        sunset_timestamp = int(daily.Variables(5).ValuesInt64AsNumpy()[0])
+        next_sunrise_timestamp = int(daily.Variables(4).ValuesInt64AsNumpy()[1])
         sunrise = datetime.fromtimestamp(sunrise_timestamp, timezone.utc).astimezone(
             local_timezone
         )
@@ -146,16 +152,11 @@ class WeatherClient:
             next_sunrise_timestamp, timezone.utc
         ).astimezone(local_timezone)
 
-        # -------- Rain chance (derived) --------
-        hourly = response.Hourly()
-        rain_probs = hourly.Variables(0).ValuesAsNumpy()
-
-        rain_chance_today = float(rain_probs[:24].max())
-
         current_conditions = CurrentConditions(
             temperature=float(temperature),
             apparent_temperature=float(feels_like),
             condition=self._weathercode_to_text(weather_code),
+            us_aqi=us_aqi,
         )
         today = DailyForecast(
             maximum_temperature=high,
@@ -175,6 +176,24 @@ class WeatherClient:
         )
 
         return detailed
+
+    def _get_current_us_aqi(self, lat, lon) -> int | None:
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": ["us_aqi"],
+            "timezone": "auto",
+            "forecast_days": 1,
+        }
+
+        try:
+            responses = self.client.weather_api(self.AIR_QUALITY_URL, params=params)
+            current = responses[0].Current()
+            value = float(current.Variables(0).Value())
+            return None if math.isnan(value) else int(round(value))
+        except Exception:
+            logger.warning("Unable to retrieve current AQI", exc_info=True)
+            return None
 
 
     def get_current_weather_multi_cities(self) -> list[WeatherNow]:

@@ -94,6 +94,12 @@ def run():
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
     solar_label, solar_time = select_solar_event(detailed)
 
+    aqi_value: int | str = (
+        detailed.current.us_aqi
+        if detailed.current.us_aqi is not None
+        else "--"
+    )
+
     vbml_components = []
     for hc in weather_header.compose_header_components():
         vbml_components.append(hc)
@@ -187,7 +193,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string(solar_label, format_time(solar_time)),
+            format_string("AQI ", aqi_value, precision=0),
             justify="right",
             align="top",
             height=1,
@@ -203,6 +209,16 @@ def run():
                 detailed.temperature_unit,
             ),
             justify="left",
+            align="top",
+            height=1,
+            width=11
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            format_string(solar_label, format_time(solar_time)),
+            justify="right",
             align="top",
             height=1,
             width=11
