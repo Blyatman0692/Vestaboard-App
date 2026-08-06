@@ -6,6 +6,7 @@ from typing import Optional
 from app import build_weather_container
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from weather_app.weather import DetailedWeather
 from weather_app.weather_header import WeatherHeader
 
 from vestaboard import utils
@@ -64,14 +65,17 @@ def format_time(value: datetime) -> str:
     return f"{value.hour:02d}:{value.minute:02d}"
 
 
-def select_solar_event(detailed, now: Optional[datetime] = None) -> tuple[str, datetime]:
-    local_now = now or datetime.now(detailed.sunrise.tzinfo)
+def select_solar_event(
+    detailed: DetailedWeather,
+    now: Optional[datetime] = None,
+) -> tuple[str, datetime]:
+    local_now = now or datetime.now(detailed.today.sunrise.tzinfo)
 
-    if local_now < detailed.sunrise:
-        return "RISE ", detailed.sunrise
-    if local_now < detailed.sunset:
-        return "SET ", detailed.sunset
-    return "RISE ", detailed.next_sunrise
+    if local_now < detailed.today.sunrise:
+        return "RISE ", detailed.today.sunrise
+    if local_now < detailed.today.sunset:
+        return "SET ", detailed.today.sunset
+    return "RISE ", detailed.today.next_sunrise
 
 
 def run():
@@ -90,6 +94,12 @@ def run():
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
     solar_label, solar_time = select_solar_event(detailed)
 
+    aqi_value: int | str = (
+        detailed.current.us_aqi
+        if detailed.current.us_aqi is not None
+        else "--"
+    )
+
     vbml_components = []
     for hc in weather_header.compose_header_components():
         vbml_components.append(hc)
@@ -106,7 +116,7 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            detailed.condition,
+            detailed.current.condition,
             justify="right",
             align="top",
             height=1,
@@ -116,7 +126,11 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("NOW ", detailed.temp_now, detailed.unit),
+            format_string(
+                "NOW ",
+                detailed.current.temperature,
+                detailed.temperature_unit,
+            ),
             justify="left",
             align="top",
             height=1,
@@ -126,7 +140,12 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("UVI ", detailed.uv_idx),
+            format_string(
+                "UVI ",
+                detailed.current.uv_index
+                if detailed.current.uv_index is not None
+                else "--",
+            ),
             justify="right",
             align="top",
             height=1,
@@ -136,7 +155,11 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("LIKE ", detailed.feels_like, detailed.unit),
+            format_string(
+                "LIKE ",
+                detailed.current.apparent_temperature,
+                detailed.temperature_unit,
+            ),
             justify="left",
             align="top",
             height=1,
@@ -146,7 +169,12 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("RAIN ", detailed.rain_chance_today, "%", 0),
+            format_string(
+                "RAIN ",
+                detailed.today.maximum_precipitation_probability,
+                "%",
+                0,
+            ),
             justify="right",
             align="top",
             height=1,
@@ -156,7 +184,35 @@ def run():
 
     vbml_components.append(
         utils.compose_vbml_component(
-            format_string("MAX ", detailed.temp_max, detailed.unit),
+            format_string(
+                "MAX ",
+                detailed.today.maximum_temperature,
+                detailed.temperature_unit,
+            ),
+            justify="left",
+            align="top",
+            height=1,
+            width=11
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            format_string("AQI ", aqi_value, precision=0),
+            justify="right",
+            align="top",
+            height=1,
+            width=11
+        )
+    )
+
+    vbml_components.append(
+        utils.compose_vbml_component(
+            format_string(
+                "MIN ",
+                detailed.today.minimum_temperature,
+                detailed.temperature_unit,
+            ),
             justify="left",
             align="top",
             height=1,
@@ -168,16 +224,6 @@ def run():
         utils.compose_vbml_component(
             format_string(solar_label, format_time(solar_time)),
             justify="right",
-            align="top",
-            height=1,
-            width=11
-        )
-    )
-
-    vbml_components.append(
-        utils.compose_vbml_component(
-            format_string("MIN ", detailed.temp_min, detailed.unit),
-            justify="left",
             align="top",
             height=1,
             width=11
