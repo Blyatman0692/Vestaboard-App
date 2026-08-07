@@ -102,10 +102,10 @@ class FlightRadarConfig:
         return cls(
             api_token=os.environ["FR24_API_TOKEN"],
             bounds=FlightBounds(
-                lat_min=_get_float_env("FLIGHT_LAMIN", 47.693460),
-                lon_min=_get_float_env("FLIGHT_LOMIN", -122.231550),
-                lat_max=_get_float_env("FLIGHT_LAMAX", 47.783530),
-                lon_max=_get_float_env("FLIGHT_LOMAX", -122.097800),
+                lat_min=_get_float_env("FLIGHT_LAMIN", 47.725046),
+                lon_min=_get_float_env("FLIGHT_LOMIN", -122.184747),
+                lat_max=_get_float_env("FLIGHT_LAMAX", 47.751995),
+                lon_max=_get_float_env("FLIGHT_LOMAX", -122.144675),
             ),
             base_url=os.environ.get("FR24_BASE_URL", cls.base_url),
             api_version=os.environ.get("FR24_API_VERSION", cls.api_version),
