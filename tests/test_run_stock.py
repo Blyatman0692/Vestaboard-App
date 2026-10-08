@@ -6,9 +6,24 @@ from zoneinfo import ZoneInfo
 
 from stock_app.massive_client import AggregateBar, MassiveApiError, TickerSnapshot
 from stock_app.run_stock import run
+from vestaboard.board_state import BoardState
+from vestaboard.queued_message import QueuedMessage
 
 
 class RunStockTests(unittest.TestCase):
+    def setUp(self) -> None:
+        time_gate = patch("stock_app.run_stock.utils.time_gate", return_value=True)
+        time_gate.start()
+        self.addCleanup(time_gate.stop)
+        self.board = SimpleNamespace(
+            vestaboard_messenger=Mock(),
+            message_queue=Mock(),
+            display_manager=Mock(),
+        )
+        self.layout = [[0] * 22 for _ in range(6)]
+        self.board.vestaboard_messenger.vbml_compose_layout.return_value = self.layout
+        self.board.message_queue.enqueue.return_value = "stock-message-id"
+
     @patch("stock_app.run_stock.logger")
     @patch("stock_app.run_stock.build_stock_container")
     def test_run_logs_each_ticker_snapshot(
@@ -22,6 +37,7 @@ class RunStockTests(unittest.TestCase):
         build_container.return_value = SimpleNamespace(
             config=SimpleNamespace(tickers=("AAPL",)),
             massive_client=client,
+            board=self.board,
         )
 
         run()
@@ -33,6 +49,8 @@ class RunStockTests(unittest.TestCase):
             "prev_close=$198.00 high=$205.00 low=$198.50 volume=1,234,567 "
             "as_of=2026-06-12 15:28 ET",
         )
+        self._assert_queued()
+        logger.info.assert_any_call("Stock message queued: %s", "stock-message-id")
 
     @patch("stock_app.run_stock.logger")
     @patch("stock_app.run_stock.build_stock_container")
@@ -50,6 +68,7 @@ class RunStockTests(unittest.TestCase):
         build_container.return_value = SimpleNamespace(
             config=SimpleNamespace(tickers=("AAPL",)),
             massive_client=client,
+            board=self.board,
         )
 
         run()
@@ -62,6 +81,19 @@ class RunStockTests(unittest.TestCase):
         )
         self.assertEqual(client.get_daily_bars.call_args.kwargs["sort"], "desc")
         self.assertEqual(client.get_daily_bars.call_args.kwargs["limit"], 2)
+        self._assert_queued()
+
+    def _assert_queued(self) -> None:
+        self.board.message_queue.enqueue.assert_called_once()
+        queued_message = self.board.message_queue.enqueue.call_args.args[0]
+        self.assertIsInstance(queued_message, QueuedMessage)
+        self.assertEqual(queued_message.message.state, BoardState.STOCK)
+        self.assertEqual(queued_message.message.source, "stock_app")
+        self.assertEqual(queued_message.message.layout, self.layout)
+        self.board.display_manager.send.assert_not_called()
+        self.board.vestaboard_messenger.send_layout.assert_not_called()
+        self.board.vestaboard_messenger.send_message.assert_not_called()
+        self.board.vestaboard_messenger.set_transition.assert_not_called()
 
     @staticmethod
     def _snapshot() -> TickerSnapshot:

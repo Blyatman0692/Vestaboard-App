@@ -10,6 +10,7 @@ from stock_app.massive_client import (
 from vestaboard import utils
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.queued_message import QueuedMessage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,17 +59,17 @@ def _compose_stock_vbml_payload(stock_prices: list[StockPrice]) -> dict:
     return utils.compose_vbml_payload(vbml_components)
 
 
-def _send_prices_to_vestaboard(
+def _enqueue_prices(
     container,
     stock_prices: list[StockPrice],
-) -> None:
+) -> str:
     vbml_payload = _compose_stock_vbml_payload(stock_prices)
     vbml_layout = container.board.vestaboard_messenger.vbml_compose_layout(
         vbml_payload
     )
 
     message = BoardMessage(BoardState.STOCK, "stock_app", layout=vbml_layout)
-    container.board.display_manager.send(message)
+    return container.board.message_queue.enqueue(QueuedMessage(message=message))
 
 
 def _get_latest_daily_price(container, ticker: str) -> StockPrice | None:
@@ -129,10 +130,10 @@ def run() -> None:
         return
 
     try:
-        _send_prices_to_vestaboard(container, stock_prices)
-        logger.info("Stock message sent successfully")
+        message_id = _enqueue_prices(container, stock_prices)
+        logger.info("Stock message queued: %s", message_id)
     except Exception:
-        logger.exception("Error sending stock message")
+        logger.exception("Error enqueueing stock message")
         raise
 
 
