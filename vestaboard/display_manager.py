@@ -19,11 +19,11 @@ class DisplayManager:
         prev_record = self._get_prev_record()
 
         transition, transition_speed = self._decide_transition(prev_record, message)
-        board_transition, board_transition_speed = self.messenger.set_transition(transition, transition_speed)
 
-        # persist record first to allow transition to be properly set
-        self._persist_record(message, board_transition)
+        applied_transition, _ = self.messenger.set_transition(transition, transition_speed)
+
         self._send_content(message)
+        self._persist_record(message, applied_transition)
 
     def _get_prev_record(self) -> BoardDisplayRecord:
         return self.redis_data_store.get_current_record()
