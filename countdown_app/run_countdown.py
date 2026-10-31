@@ -7,6 +7,7 @@ from countdown_app.targets import TARGET_DATES
 from vestaboard import utils
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.queued_message import QueuedMessage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +29,7 @@ def run():
     container = build_board_container()
     vb = container.vestaboard_messenger
     ct = CountDown(TARGET_DATES)
-    manager = container.display_manager
+    message_queue = container.message_queue
 
     try:
         results = ct.calculate_date_delta()
@@ -38,7 +39,7 @@ def run():
         raise
 
     if not results:
-        logger.warning("No countdown results returned; skipping message send.")
+        logger.warning("No countdown results returned; skipping message enqueue.")
         return
 
     vbml_components = []
@@ -100,10 +101,10 @@ def run():
 
     try:
         msg = BoardMessage(BoardState.COUNTDOWN, "countdown_app", layout=vbml_layout)
-        manager.send(msg)
-        logger.info("Countdown message sent successfully")
+        message_id = message_queue.enqueue(QueuedMessage(message=msg))
+        logger.info("Countdown message queued: %s", message_id)
     except Exception:
-        logger.exception("Error sending countdown message")
+        logger.exception("Error enqueueing countdown message")
         raise
 
 if __name__ == "__main__":

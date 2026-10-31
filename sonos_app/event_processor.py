@@ -1,19 +1,25 @@
+import logging
+
 from sonos_app.playback_metadata import PlaybackMetadata
 from vestaboard import utils
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
-from vestaboard.display_manager import DisplayManager
+from vestaboard.message_queue import RedisMessageQueue
+from vestaboard.queued_message import QueuedMessage
 from vestaboard.vestaboard import VestaboardMessenger
+
+
+logger = logging.getLogger(__name__)
 
 
 class EventProcessor:
     def __init__(
         self,
         vestaboard_messenger: VestaboardMessenger,
-        display_manager: DisplayManager,
+        message_queue: RedisMessageQueue,
     ):
         self.vb_messenger = vestaboard_messenger
-        self.manager = display_manager
+        self.message_queue = message_queue
 
     def process_metadata(self, metadata: PlaybackMetadata):
         if not self._is_relevant_metadata(metadata):
@@ -33,7 +39,8 @@ class EventProcessor:
         vbml_layout = self.vb_messenger.vbml_compose_layout(vbml_payload)
 
         msg = BoardMessage(BoardState.SONOS, "sonos_app", layout=vbml_layout)
-        self.manager.send(msg)
+        message_id = self.message_queue.enqueue(QueuedMessage(message=msg))
+        logger.info("Sonos message queued: %s", message_id)
 
     @staticmethod
     def _is_relevant_metadata(metadata: PlaybackMetadata):
@@ -89,5 +96,4 @@ class EventProcessor:
         )
 
         return [track_name_comp, artist_comp, album_comp]
-
 

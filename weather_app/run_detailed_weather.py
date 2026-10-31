@@ -6,6 +6,7 @@ from typing import Optional
 from app import build_weather_container
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.queued_message import QueuedMessage
 from weather_app.weather import DetailedWeather
 from weather_app.weather_header import WeatherHeader
 
@@ -89,7 +90,7 @@ def run():
     wc = container.weather_client
     weather_header = WeatherHeader()
     vb = container.board.vestaboard_messenger
-    manager = container.board.display_manager
+    message_queue = container.board.message_queue
 
     detailed = wc.get_detailed_weather("WOODINVILLE", 47.75, -122.16)
     solar_label, solar_time = select_solar_event(detailed)
@@ -237,10 +238,10 @@ def run():
 
     try:
         msg = BoardMessage(BoardState.WEATHER, "detailed_weather_app", layout=vbml_layout)
-        manager.send(msg)
-        logger.info("Message sent successfully")
+        message_id = message_queue.enqueue(QueuedMessage(message=msg))
+        logger.info("Detailed weather message queued: %s", message_id)
     except Exception:
-        logger.exception("Error sending message")
+        logger.exception("Error enqueueing detailed weather message")
         raise
 
 if __name__ == "__main__":

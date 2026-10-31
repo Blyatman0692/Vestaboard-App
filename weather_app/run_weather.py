@@ -5,6 +5,7 @@ from typing import List
 from app import build_weather_container
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.queued_message import QueuedMessage
 from weather_app.weather_header import WeatherHeader
 from weather_app.weather import WeatherNow, format_weather_line
 
@@ -31,7 +32,7 @@ def run():
     wc = container.weather_client
     weather_header = WeatherHeader()
     vb = container.board.vestaboard_messenger
-    manager = container.board.display_manager
+    message_queue = container.board.message_queue
 
     weather_data: List[WeatherNow] = []
 
@@ -44,7 +45,7 @@ def run():
         raise
 
     if not weather_data:
-        logger.warning("No weather data returned; skipping message send.")
+        logger.warning("No weather data returned; skipping message enqueue.")
         return
 
     vbml_components = []
@@ -62,10 +63,10 @@ def run():
 
     try:
         msg = BoardMessage(BoardState.WEATHER, "weather_app", layout=vbml_layout)
-        manager.send(msg)
-        logger.info("Message sent successfully")
+        message_id = message_queue.enqueue(QueuedMessage(message=msg))
+        logger.info("Weather message queued: %s", message_id)
     except Exception:
-        logger.exception("Error sending message")
+        logger.exception("Error enqueueing weather message")
         raise
 
 

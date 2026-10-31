@@ -2,8 +2,9 @@ import os
 import time
 import random
 import json
+from contextlib import AbstractContextManager, nullcontext
 import requests
-from typing import Any, Dict, Optional, List, Tuple
+from typing import Any, Callable, Dict, Optional, List, Tuple
 from vestaboard.transitions import Transition, TransitionSpeed
 
 
@@ -33,6 +34,8 @@ class VestaboardMessenger:
         retry_base_delay_s: float = 0.8,
         retry_max_delay_s: float = 10.0,
         session: requests.Session | None = None,
+        write_guard: Callable[[bool], AbstractContextManager] | None = None,
+        retry_sleep: Callable[[float], None] | None = None,
     ):
         self.api_key = api_key or os.getenv("VB_RW_API_KEY")
         if not self.api_key:
@@ -46,6 +49,9 @@ class VestaboardMessenger:
         self.retry_base_delay_s = retry_base_delay_s
         self.retry_max_delay_s = retry_max_delay_s
         self._session = session or requests.Session()
+        # The display worker supplies lease/cooldown handling for every attempt.
+        self.write_guard = write_guard
+        self.retry_sleep = retry_sleep
         self.headers = {
             "Content-Type": "application/json",
             self.HEADER_NAME: self.api_key,
@@ -56,14 +62,15 @@ class VestaboardMessenger:
         return status_code in {408, 425, 429, 500, 502, 503, 504}
 
     def _sleep_backoff(self, attempt: int, *, retry_after_s: float | None = None) -> None:
+        sleep = self.retry_sleep or time.sleep
         # Prefer server-provided Retry-After when present.
         if retry_after_s is not None:
-            time.sleep(max(0.0, retry_after_s))
+            sleep(max(0.0, retry_after_s))
             return
 
         backoff = min(self.retry_max_delay_s, self.retry_base_delay_s * (2 ** (attempt - 1)))
         jitter = random.uniform(0.0, 0.5)
-        time.sleep(backoff + jitter)
+        sleep(backoff + jitter)
 
     def _request_json(self, method: str, url: str, *, json: Any | None = None) -> Any:
         """Make an HTTP request with retries and return parsed JSON."""
@@ -71,13 +78,22 @@ class VestaboardMessenger:
 
         for attempt in range(1, self.retry_attempts + 1):
             try:
-                resp = self._session.request(
-                    method,
-                    url,
-                    headers=self.headers,
-                    json=json,
-                    timeout=self.timeout_s,
+                is_content_write = method == "POST" and url == self.VESTABOARD_URL
+                is_transition_write = method == "PUT" and url == self.TRANSITION_URL
+                guard = (
+                    self.write_guard(is_content_write)
+                    if self.write_guard and (is_content_write or is_transition_write)
+                    else nullcontext()
                 )
+                # Include each retry and ambiguous timeout in the same timing gate.
+                with guard:
+                    resp = self._session.request(
+                        method,
+                        url,
+                        headers=self.headers,
+                        json=json,
+                        timeout=self.timeout_s,
+                    )
 
                 # Intercept 409 Conflict (Message already displayed)
                 if resp.status_code == 409:

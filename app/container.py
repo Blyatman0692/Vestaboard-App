@@ -10,6 +10,7 @@ from flight_app.flight_radar_client import FlightRadarClient
 from redis_data_store import RedisDataStore
 from stock_app.massive_client import MassiveClient
 from vestaboard.display_manager import DisplayManager
+from vestaboard.message_queue import RedisMessageQueue
 from vestaboard.vestaboard import VestaboardMessenger
 from weather_app.weather import WeatherClient
 
@@ -20,6 +21,7 @@ class BoardContainer:
     vestaboard_messenger: VestaboardMessenger
     redis_data_store: RedisDataStore
     display_manager: DisplayManager
+    message_queue: RedisMessageQueue
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ def build_board_container(config: BoardConfig | None = None) -> BoardContainer:
 
     vestaboard_messenger = VestaboardMessenger(api_key=config.vb_rw_api_key)
     redis_data_store = RedisDataStore(config.redis_url)
+    message_queue = RedisMessageQueue(redis_data_store)
     display_manager = DisplayManager(
         messenger=vestaboard_messenger,
         redis_data_store=redis_data_store,
@@ -66,6 +69,7 @@ def build_board_container(config: BoardConfig | None = None) -> BoardContainer:
         vestaboard_messenger=vestaboard_messenger,
         redis_data_store=redis_data_store,
         display_manager=display_manager,
+        message_queue=message_queue,
     )
 
 
@@ -141,7 +145,7 @@ def build_sonos_container(
     )
     sonos_event_processor = EventProcessor(
         vestaboard_messenger=board.vestaboard_messenger,
-        display_manager=board.display_manager,
+        message_queue=board.message_queue,
     )
 
     return SonosContainer(

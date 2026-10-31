@@ -7,6 +7,7 @@ from app import build_flight_container
 from vestaboard import utils
 from vestaboard.board_message import BoardMessage
 from vestaboard.board_state import BoardState
+from vestaboard.queued_message import QueuedMessage
 from flight_app.flight_radar_client import FlightPosition
 
 logging.basicConfig(
@@ -105,12 +106,12 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
     return utils.compose_vbml_payload(vbml_components)
 
 
-def _send_position_to_vestaboard(container, position: FlightPosition) -> None:
+def _enqueue_position(container, position: FlightPosition) -> str:
     vbml_payload = _compose_flight_vbml_payload(position)
     vbml_layout = container.board.vestaboard_messenger.vbml_compose_layout(vbml_payload)
 
     msg = BoardMessage(BoardState.FLIGHT, "flight_app", layout=vbml_layout)
-    container.board.display_manager.send(msg)
+    return container.board.message_queue.enqueue(QueuedMessage(message=msg))
 
 
 def _has_seen_flight(container, fr24_id: str) -> bool:
@@ -168,9 +169,10 @@ def run() -> None:
     logger.info("Selected flight for Vestaboard: %s", position.console_summary)
     print(position.console_summary)
 
-    _send_position_to_vestaboard(container, position)
+    message_id = _enqueue_position(container, position)
+    # "Seen" now means accepted into the queue, rather than successfully displayed.
     _mark_flight_seen(container, position.fr24_id)
-    logger.info("Flight message sent successfully")
+    logger.info("Flight message queued: %s", message_id)
 
 
 if __name__ == "__main__":
