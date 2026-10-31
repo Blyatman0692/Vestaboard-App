@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from typing import cast
 
 import redis
@@ -20,6 +21,8 @@ class RedisDataStore:
     FLIGHT_SEEN_KEY_PREFIX = "flight:seen"
     # The queue namespace currently assumes one board per Redis database.
     PENDING_QUEUE_KEY = "vestaboard:queue:pending"
+    DISPLAY_LOCK_KEY = "vestaboard:display:lock"
+    DISPLAY_COOLDOWN_KEY = "vestaboard:display:cooldown"
 
     def __init__(self, redis_url):
         self.client = redis.Redis.from_url(
@@ -27,16 +30,16 @@ class RedisDataStore:
             decode_responses=True,
         )
 
-    def get_current_record(self):
+    def get_current_record(self) -> BoardDisplayRecord | None:
         data = self.client.hgetall(self.BOARD_KEY)
 
         if not data:
-            raise ValueError("No current board state recorded")
+            return None
 
         return BoardDisplayRecord(
             state=BoardState(data["state"]),
             source=data["source"],
-            transition=data["transition"],
+            transition=Transition(data["transition"]),
         )
 
     def set_current_record(self, message: BoardMessage, transition: Transition):
@@ -71,6 +74,22 @@ class RedisDataStore:
 
         _queue_key, payload_json = queue_entry
         return payload_json
+
+    def display_lock(self, timeout_s: float):
+        """Create a token-owned lease shared by all display workers."""
+        return self.client.lock(self.DISPLAY_LOCK_KEY, timeout=timeout_s)
+
+    def get_display_cooldown_s(self) -> float:
+        """Read remaining cooldown using Redis time, independent of worker clocks."""
+        ttl_ms = self.client.pttl(self.DISPLAY_COOLDOWN_KEY)
+        if ttl_ms == -1:
+            raise ValueError("Display cooldown key must have an expiration.")
+        return max(0, ttl_ms) / 1000
+
+    def set_display_cooldown(self, duration_s: float) -> None:
+        self.client.set(
+            self.DISPLAY_COOLDOWN_KEY, "1", px=math.ceil(duration_s * 1000)
+        )
 
     def has_seen_flight(self, fr24_id: str) -> bool:
         return bool(self.client.exists(self._flight_seen_key(fr24_id)))

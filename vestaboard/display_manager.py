@@ -5,7 +5,10 @@ from vestaboard.board_message import BoardMessage
 from vestaboard.transitions import Transition, TransitionSpeed
 from vestaboard.vestaboard import VestaboardMessenger
 
+
 class DisplayManager:
+    """Apply a message to the board; producers submit through RedisMessageQueue."""
+
     def __init__(
         self,
         messenger: VestaboardMessenger,
@@ -13,7 +16,6 @@ class DisplayManager:
     ):
         self.messenger = messenger
         self.redis_data_store = redis_data_store
-
 
     def send(self, message: BoardMessage):
         prev_record = self._get_prev_record()
@@ -25,28 +27,28 @@ class DisplayManager:
         self._send_content(message)
         self._persist_record(message, applied_transition)
 
-    def _get_prev_record(self) -> BoardDisplayRecord:
+    def _get_prev_record(self) -> BoardDisplayRecord | None:
         return self.redis_data_store.get_current_record()
 
     def _persist_record(self, message: BoardMessage, transition: Transition):
         self.redis_data_store.set_current_record(message, transition)
 
     def _send_content(self, message: BoardMessage):
-        if message.layout:
+        if message.layout is not None:
             self.messenger.send_layout(message.layout)
             return
 
         self.messenger.send_message(message.text)
 
     @staticmethod
-    def _decide_transition(prev_record: BoardDisplayRecord, next_message: BoardMessage):
+    def _decide_transition(prev_record: BoardDisplayRecord | None, next_message: BoardMessage):
         fancy_transitions_enabled = (
             os.environ.get("FANCY_TRANSITIONS", "true").strip().lower() != "false"
         )
         if not fancy_transitions_enabled:
             return Transition.CLASSIC, TransitionSpeed.FAST
 
-        if prev_record.state != next_message.state:
+        if prev_record is None or prev_record.state != next_message.state:
             return Transition.CURTAIN, TransitionSpeed.FAST
 
         return Transition.CLASSIC, TransitionSpeed.FAST
