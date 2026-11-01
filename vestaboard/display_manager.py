@@ -17,7 +17,8 @@ class DisplayManager:
         self.messenger = messenger
         self.redis_data_store = redis_data_store
 
-    def send(self, message: BoardMessage):
+    def send(self, message: BoardMessage) -> Transition:
+        """Send content; the worker records state atomically with acknowledgment."""
         prev_record = self._get_prev_record()
 
         transition, transition_speed = self._decide_transition(prev_record, message)
@@ -25,13 +26,10 @@ class DisplayManager:
         applied_transition, _ = self.messenger.set_transition(transition, transition_speed)
 
         self._send_content(message)
-        self._persist_record(message, applied_transition)
+        return applied_transition
 
     def _get_prev_record(self) -> BoardDisplayRecord | None:
         return self.redis_data_store.get_current_record()
-
-    def _persist_record(self, message: BoardMessage, transition: Transition):
-        self.redis_data_store.set_current_record(message, transition)
 
     def _send_content(self, message: BoardMessage):
         if message.layout is not None:

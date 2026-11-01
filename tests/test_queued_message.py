@@ -83,6 +83,25 @@ class QueuedMessageTests(unittest.TestCase):
 
         self.assertEqual(QueuedMessage.from_json(message.to_json()), message)
 
+    def test_optional_flight_id_round_trips_without_changing_legacy_messages(self) -> None:
+        message = QueuedMessage(
+            BoardMessage(BoardState.FLIGHT, "flight_app", text="FLIGHT"), flight_id="flight-1"
+        )
+        self.assertEqual(QueuedMessage.from_json(message.to_json()), message)
+        legacy = json.loads(message.to_json())
+        del legacy["flight_id"]
+        self.assertIsNone(QueuedMessage.from_json(json.dumps(legacy)).flight_id)
+
+    def test_invalid_flight_metadata_is_rejected(self) -> None:
+        for flight_id in ("", " ", 123):
+            with self.subTest(flight_id=flight_id), self.assertRaises(ValueError):
+                QueuedMessage(
+                    BoardMessage(BoardState.FLIGHT, "flight_app", text="FLIGHT"),
+                    flight_id=flight_id,
+                )
+        with self.assertRaises(ValueError):
+            QueuedMessage(BoardMessage(BoardState.WEATHER, "weather_app", text="SUNNY"), flight_id="flight-1")
+
     def test_missing_envelope_fields_are_rejected_without_new_defaults(self) -> None:
         for field in ("schema_version", "message_id", "created_at", "message"):
             with self.subTest(field=field):
