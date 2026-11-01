@@ -106,22 +106,18 @@ def _compose_flight_vbml_payload(position: FlightPosition) -> dict:
     return utils.compose_vbml_payload(vbml_components)
 
 
-def _enqueue_position(container, position: FlightPosition) -> str:
+def _enqueue_position(container, position: FlightPosition) -> str | None:
     vbml_payload = _compose_flight_vbml_payload(position)
     vbml_layout = container.board.vestaboard_messenger.vbml_compose_layout(vbml_payload)
 
     msg = BoardMessage(BoardState.FLIGHT, "flight_app", layout=vbml_layout)
-    return container.board.message_queue.enqueue(QueuedMessage(message=msg))
-
-
-def _has_seen_flight(container, fr24_id: str) -> bool:
-    return container.board.redis_data_store.has_seen_flight(fr24_id)
-
-
-def _mark_flight_seen(container, fr24_id: str) -> None:
-    container.board.redis_data_store.mark_flight_seen(
-        fr24_id,
+    return container.board.message_queue.enqueue(
+        QueuedMessage(message=msg, flight_id=position.fr24_id)
     )
+
+
+def _has_pending_or_seen_flight(container, fr24_id: str) -> bool:
+    return container.board.redis_data_store.has_pending_or_seen_flight(fr24_id)
 
 
 def run() -> None:
@@ -146,8 +142,8 @@ def run() -> None:
         return
 
     light_position = light_positions[0]
-    if _has_seen_flight(container, light_position.fr24_id):
-        logger.info("Flight %s already seen from light lookup; skipping full lookup", light_position.fr24_id)
+    if _has_pending_or_seen_flight(container, light_position.fr24_id):
+        logger.info("Flight %s pending or displayed; skipping full lookup", light_position.fr24_id)
         return
 
     logger.info("Fetching FR24 full live position details: bounds=%s limit=1", bounds)
@@ -162,17 +158,18 @@ def run() -> None:
         return
 
     position = positions[0]
-    if _has_seen_flight(container, position.fr24_id):
-        logger.info("Flight %s already seen from full lookup; skipping Vestaboard update", position.fr24_id)
+    if _has_pending_or_seen_flight(container, position.fr24_id):
+        logger.info("Flight %s pending or displayed; skipping Vestaboard update", position.fr24_id)
         return
 
     logger.info("Selected flight for Vestaboard: %s", position.console_summary)
     print(position.console_summary)
 
     message_id = _enqueue_position(container, position)
-    # "Seen" now means accepted into the queue, rather than successfully displayed.
-    _mark_flight_seen(container, position.fr24_id)
-    logger.info("Flight message queued: %s", message_id)
+    if message_id is None:
+        logger.info("Flight %s was already pending or displayed when enqueueing", position.fr24_id)
+    else:
+        logger.info("Flight message queued: %s", message_id)
 
 
 if __name__ == "__main__":

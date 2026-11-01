@@ -40,9 +40,13 @@ class PipelineQueueingTests(unittest.TestCase):
         )
 
     def assert_queued(self, state: BoardState, source: str) -> None:
-        self.store.enqueue_message.assert_called_once()
+        enqueue = (
+            self.store.enqueue_flight_message if state == BoardState.FLIGHT
+            else self.store.enqueue_message
+        )
+        enqueue.assert_called_once()
         queued_message = QueuedMessage.from_json(
-            self.store.enqueue_message.call_args.args[0]
+            enqueue.call_args.args[0]
         )
         self.assertEqual(queued_message.message.state, state)
         self.assertEqual(queued_message.message.source, source)
@@ -102,28 +106,52 @@ class PipelineQueueingTests(unittest.TestCase):
 
         self.assert_queued(BoardState.COUNTDOWN, "countdown_app")
 
-    def test_flight_is_marked_seen_after_queue_accepts_it(self) -> None:
+    def test_flight_registers_pending_delivery_atomically_with_enqueue(self) -> None:
         container = self.flight_container()
-
-        def accept_message(payload_json: str) -> None:
-            self.store.mark_flight_seen.assert_not_called()
-
-        self.store.enqueue_message.side_effect = accept_message
+        self.store.enqueue_flight_message.return_value = True
         with patch.object(run_flight, "build_flight_container", return_value=container):
             run_flight.run()
 
         self.assert_queued(BoardState.FLIGHT, "flight_app")
-        self.store.mark_flight_seen.assert_called_once_with("flight-1")
+        payload, message_id, flight_id = self.store.enqueue_flight_message.call_args.args
+        self.assertEqual(QueuedMessage.from_json(payload).flight_id, "flight-1")
+        self.assertEqual(QueuedMessage.from_json(payload).message_id, message_id)
+        self.assertEqual(flight_id, "flight-1")
+        self.store.enqueue_message.assert_not_called()
 
     def test_failed_flight_enqueue_does_not_mark_flight_seen(self) -> None:
         container = self.flight_container()
-        self.store.enqueue_message.side_effect = ConnectionError("Redis unavailable")
+        self.store.enqueue_flight_message.side_effect = ConnectionError("Redis unavailable")
 
         with patch.object(run_flight, "build_flight_container", return_value=container):
             with self.assertRaises(ConnectionError):
                 run_flight.run()
 
-        self.store.mark_flight_seen.assert_not_called()
+        self.assert_no_display_changes()
+
+    def test_pending_flight_skips_full_lookup_and_enqueue(self) -> None:
+        container = self.flight_container()
+        self.store.has_pending_or_seen_flight.return_value = True
+
+        with patch.object(run_flight, "build_flight_container", return_value=container):
+            run_flight.run()
+
+        container.flight_radar_client.get_live_positions_full.assert_not_called()
+        self.store.enqueue_flight_message.assert_not_called()
+
+    def test_duplicate_flight_enqueue_race_is_logged_as_skipped(self) -> None:
+        container = self.flight_container()
+        self.store.enqueue_flight_message.return_value = False
+
+        with (
+            patch.object(run_flight, "build_flight_container", return_value=container),
+            patch.object(run_flight, "logger") as logger,
+        ):
+            run_flight.run()
+
+        logger.info.assert_called_with(
+            "Flight %s was already pending or displayed when enqueueing", "flight-1"
+        )
         self.assert_no_display_changes()
 
     def test_sonos_enqueues_serialized_layout(self) -> None:
@@ -160,7 +188,7 @@ class PipelineQueueingTests(unittest.TestCase):
             altitude_meters=10000,
             console_summary="AB123 SEA-SFO",
         )
-        self.store.has_seen_flight.return_value = False
+        self.store.has_pending_or_seen_flight.return_value = False
         client = Mock()
         client.get_live_positions_light.return_value = [position]
         client.get_live_positions_full.return_value = [position]
