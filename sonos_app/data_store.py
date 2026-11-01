@@ -15,6 +15,92 @@ class PostgresDataStore:
         return value.isoformat() if value else None
 
     @staticmethod
+    def _ensure_playback_target_table(cur):
+        cur.execute(
+            """
+            create table if not exists sonos_playback_target (
+              user_key text primary key,
+              household_id text not null,
+              player_id text not null,
+              group_id text
+            )
+            """
+        )
+
+    def save_playback_target(self, household_id: str, player_id: str):
+        """Select a speaker, keeping its cached group only if the target is unchanged."""
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_playback_target_table(cur)
+                cur.execute(
+                    """
+                    insert into sonos_playback_target (user_key, household_id, player_id)
+                    values (%s, %s, %s)
+                    on conflict (user_key) do update set
+                      household_id = excluded.household_id,
+                      player_id = excluded.player_id,
+                      group_id = case
+                        when sonos_playback_target.household_id = excluded.household_id
+                         and sonos_playback_target.player_id = excluded.player_id
+                        then sonos_playback_target.group_id
+                        else null
+                      end
+                    returning household_id, player_id, group_id
+                    """,
+                    (self.user_key, household_id, player_id),
+                )
+                household_id, player_id, group_id = cur.fetchone()
+
+        return {
+            "household_id": household_id,
+            "player_id": player_id,
+            "group_id": group_id,
+        }
+
+    def load_playback_target(self):
+        """Load the selected speaker even when no current group is known."""
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_playback_target_table(cur)
+                cur.execute(
+                    """
+                    select household_id, player_id, group_id
+                    from sonos_playback_target
+                    where user_key = %s
+                    """,
+                    (self.user_key,),
+                )
+                row = cur.fetchone()
+
+        if row is None:
+            return None
+
+        household_id, player_id, group_id = row
+        return {
+            "household_id": household_id,
+            "player_id": player_id,
+            "group_id": group_id,
+        }
+
+    def update_playback_target_group(
+        self, household_id: str, player_id: str, group_id: str | None
+    ) -> bool:
+        """Cache discovery only if the selected speaker has not changed."""
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_playback_target_table(cur)
+                cur.execute(
+                    """
+                    update sonos_playback_target
+                    set group_id = %s
+                    where user_key = %s and household_id = %s and player_id = %s
+                    """,
+                    (group_id, self.user_key, household_id, player_id),
+                )
+                updated = cur.rowcount == 1
+        return updated
+
+    @staticmethod
     def _ensure_subscriptions_table(cur):
         cur.execute(
             """
