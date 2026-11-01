@@ -288,6 +288,7 @@ async def reconcile_playback_target(
         client = SonosClient(tokens, db_client, oauth_client)
         if subscribe_groups:
             await client.subscribe_groups(household_id)
+            db_client.save_groups_subscription(household_id)
         subscription = await subscribe_target_metadata(client, db_client, target)
         return {
             "ok": True,
