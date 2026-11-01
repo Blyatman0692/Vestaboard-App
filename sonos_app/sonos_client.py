@@ -38,6 +38,13 @@ class SonosClient:
 
         return await self._get_json(url)
 
+    async def get_player_group_id(self, household_id: str, player_id: str) -> str | None:
+        groups = await self.get_groups(household_id)
+        for group in groups["groups"]:
+            if player_id in group["playerIds"]:
+                return group["id"]
+        return None
+
     async def subscribe_playback(self, group_id: str):
         url = f"{SONOS_CONTROL_BASE_URL}/groups/{group_id}/playback/subscription"
 
