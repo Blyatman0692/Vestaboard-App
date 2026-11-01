@@ -1,8 +1,12 @@
+import asyncio
+import base64
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -13,6 +17,7 @@ from psycopg.conninfo import make_conninfo
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.config import SONOS_CONTROL_BASE_URL
 from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
+from sonos_app.subscription_renewer import PlaybackMetadataSubscriptionRenewer
 from sonos_app.token import SonosToken
 
 
@@ -42,6 +47,9 @@ class PlaybackTargetTests(unittest.TestCase):
     def setUp(self):
         self.store = PostgresDataStore(self.db_url, uuid4().hex)
         self.routes.db_client = self.store
+        self.routes.subscription_lock = asyncio.Lock()
+        self.routes.sonos_config = SimpleNamespace(client_id="test-client", client_secret="test-secret")
+        self.routes.event_processor = Mock()
         # No lifespan: these tests must not start the subscription renewal worker.
         self.client = TestClient(self.routes.app)
         self.addCleanup(self.client.close)
@@ -69,6 +77,27 @@ class PlaybackTargetTests(unittest.TestCase):
         target = self.store.load_playback_target()
         self.assertTrue(self.store.update_playback_target_group(
             target["household_id"], target["player_id"], group_id
+        ))
+
+    def event_headers(self, namespace="groups", event_type="groups", target_type="householdId",
+                      target_value="household-1", sequence="1"):
+        values = [sequence, namespace, event_type, target_type, target_value, "test-client", "test-secret"]
+        signature = base64.urlsafe_b64encode(
+            hashlib.sha256("".join(values).encode()).digest()
+        ).decode().rstrip("=")
+        return {
+            "X-Sonos-Event-Seq-Id": sequence,
+            "X-Sonos-Namespace": namespace,
+            "X-Sonos-Type": event_type,
+            "X-Sonos-Target-Type": target_type,
+            "X-Sonos-Target-Value": target_value,
+            "X-Sonos-Event-Signature": signature,
+        }
+
+    def assert_only_household_subscriptions(self):
+        self.assertTrue(all(
+            awaited == call(f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription")
+            for awaited in self.sonos_post.await_args_list
         ))
 
     def test_selection_persists_without_a_group_or_sonos_authorization(self):
@@ -163,7 +192,11 @@ class PlaybackTargetTests(unittest.TestCase):
                 )
                 self.assertEqual(self.store.load_playback_target()["group_id"], group_id)
         self.assertEqual(self.sonos_get.await_count, 2)
-        self.assertEqual(self.sonos_post.await_count, 2)
+        self.assertEqual(self.sonos_post.await_count, 4)
+        self.assertEqual(self.sonos_post.await_args_list[0], call(
+            f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription"
+        ))
+        self.assertEqual(response.json()["subscribed"], ["groups", "playbackMetadata"])
 
     def test_absent_player_clears_cached_group_without_changing_the_selection(self):
         target = self.select()
@@ -177,7 +210,7 @@ class PlaybackTargetTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 404)
                 self.assertEqual(self.store.load_playback_target(), target)
                 self.assertEqual(self.store.list_playback_metadata_subscriptions(), [])
-                self.sonos_post.assert_not_awaited()
+                self.assert_only_household_subscriptions()
 
     def test_discovery_failure_preserves_the_cached_group(self):
         self.select()
@@ -191,12 +224,12 @@ class PlaybackTargetTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 502)
                 self.assertEqual(self.store.load_playback_target()["group_id"], "last-known-group")
                 self.assertEqual(self.store.list_playback_metadata_subscriptions(), [])
-                self.sonos_post.assert_not_awaited()
+                self.assert_only_household_subscriptions()
 
     def test_failed_subscription_is_not_saved(self):
         self.select()
         self.sonos_get.return_value = {"groups": [{"id": "new-group", "playerIds": ["player-1"]}]}
-        self.sonos_post.side_effect = RuntimeError("Sonos API error 410")
+        self.sonos_post.side_effect = [{}, RuntimeError("Sonos API error 410")]
 
         with patch.object(self.routes.logger, "exception"):
             response = self.client.post("/sonos/playback-target/subscribe")
@@ -248,7 +281,7 @@ class PlaybackTargetTests(unittest.TestCase):
                 self.assertEqual(self.store.load_playback_target(), {
                     "household_id": household_id, "player_id": player_id, "group_id": None
                 })
-                self.sonos_post.assert_not_awaited()
+                self.assert_only_household_subscriptions()
 
     def test_cached_group_update_is_scoped_to_the_user(self):
         self.select()
@@ -258,3 +291,175 @@ class PlaybackTargetTests(unittest.TestCase):
         self.cache_group("group-1")
 
         self.assertEqual(other_store.load_playback_target(), other_target)
+
+    def test_group_event_uses_fresh_discovery_and_retires_previous_subscriptions(self):
+        self.select()
+        self.cache_group("old-group")
+        for group_id in ("old-group", "historical-group"):
+            self.store.save_playback_metadata_subscription(group_id)
+        other_store = PostgresDataStore(self.db_url, uuid4().hex)
+        other_subscription = other_store.save_playback_metadata_subscription("other-group")
+        self.sonos_get.return_value = {"groups": [{"id": "new-group", "playerIds": ["player-1"]}]}
+
+        response = self.client.post("/sonos/events", headers=self.event_headers(), json={
+            "groups": [{"id": "stale-event-group", "playerIds": ["player-1"]}]
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.sonos_post.assert_awaited_once_with(
+            f"{SONOS_CONTROL_BASE_URL}/groups/new-group/playbackMetadata/subscription"
+        )
+        self.assertEqual(self.store.load_playback_target()["group_id"], "new-group")
+        subscriptions = {row["group_id"]: row["active"] for row in self.store.list_playback_metadata_subscriptions()}
+        self.assertEqual(subscriptions, {"old-group": False, "historical-group": False, "new-group": True})
+        self.assertEqual(other_store.list_playback_metadata_subscriptions(), [other_subscription])
+        self.routes.event_processor.process_metadata.assert_not_called()
+
+    def test_group_event_sends_response_before_discovery_begins(self):
+        self.select()
+        messages = []
+
+        async def discover(url):
+            self.assertTrue(any(
+                message["type"] == "http.response.body" and not message.get("more_body", False)
+                for message in messages
+            ))
+            return {"groups": [{"id": "group-1", "playerIds": ["player-1"]}]}
+
+        async def send(message):
+            messages.append(message)
+
+        self.sonos_get.side_effect = discover
+        scope = {
+            "type": "http", "http_version": "1.1", "method": "POST",
+            "path": "/sonos/events", "raw_path": b"/sonos/events", "query_string": b"",
+            "scheme": "https", "server": ("testserver", 443), "client": ("testclient", 123),
+            "headers": [(key.lower().encode(), value.encode()) for key, value in self.event_headers().items()],
+        }
+        asyncio.run(self.routes.app(scope, AsyncMock(return_value={"type": "http.request", "body": b"{}"}), send))
+        self.assertEqual(messages[0]["status"], 200)
+        self.sonos_get.assert_awaited_once()
+
+    def test_repeated_and_versioned_group_events_do_not_create_duplicate_records(self):
+        self.select()
+        self.sonos_get.return_value = {"groups": [{"id": "group-1", "playerIds": ["player-1"]}]}
+        for namespace in ("groups", "groups:1"):
+            response = self.client.post("/sonos/events", headers=self.event_headers(namespace=namespace), json={})
+            self.assertEqual(response.status_code, 200)
+
+        subscriptions = self.store.list_playback_metadata_subscriptions()
+        self.assertEqual(len(subscriptions), 1)
+        self.assertTrue(subscriptions[0]["active"])
+        self.assertTrue(all("/households/" not in awaited.args[0] for awaited in self.sonos_post.await_args_list))
+
+    def test_group_event_for_another_household_or_without_selection_is_ignored(self):
+        response = self.client.post("/sonos/events", headers=self.event_headers(), json={})
+        self.assertEqual(response.status_code, 200)
+        self.select()
+        response = self.client.post("/sonos/events", headers=self.event_headers(target_value="other-household"), json={})
+        self.assertEqual(response.status_code, 200)
+        self.sonos_get.assert_not_awaited()
+        self.sonos_post.assert_not_awaited()
+
+    def test_invalid_or_missing_signature_cannot_schedule_reconciliation(self):
+        self.select()
+        invalid = self.event_headers()
+        invalid["X-Sonos-Event-Signature"] = "invalid"
+        for headers in (invalid, {}):
+            response = self.client.post("/sonos/events", headers=headers, json={})
+            self.assertEqual(response.status_code, 401)
+        self.sonos_get.assert_not_awaited()
+        self.sonos_post.assert_not_awaited()
+
+    def test_background_failure_is_logged_after_acknowledgment(self):
+        self.select()
+        self.cache_group("old-group")
+        old_subscription = self.store.save_playback_metadata_subscription("old-group")
+        self.sonos_get.side_effect = httpx.ConnectError("Unavailable")
+
+        with patch.object(self.routes.logger, "exception") as log:
+            response = self.client.post("/sonos/events", headers=self.event_headers(), json={})
+
+        self.assertEqual(response.status_code, 200)
+        log.assert_called_once()
+        self.assertEqual(self.store.load_playback_target()["group_id"], "old-group")
+        self.assertEqual(self.store.list_playback_metadata_subscriptions(), [old_subscription])
+
+    def test_offline_player_is_preserved_and_recovers_on_a_later_group_event(self):
+        target = self.select()
+        self.cache_group("old-group")
+        self.store.save_playback_metadata_subscription("old-group")
+
+        response = self.client.post("/sonos/events", headers=self.event_headers(), json={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.store.load_playback_target(), target)
+        self.assertFalse(self.store.list_playback_metadata_subscriptions()[0]["active"])
+        self.sonos_post.assert_not_awaited()
+        self.sonos_get.return_value = {"groups": [{"id": "returned-group", "playerIds": ["player-1"]}]}
+        self.client.post("/sonos/events", headers=self.event_headers(sequence="2"), json={})
+        self.assertEqual(self.store.load_playback_target()["group_id"], "returned-group")
+        self.sonos_post.assert_awaited_once()
+
+    def test_old_metadata_is_ignored_and_current_metadata_is_processed(self):
+        self.select()
+        self.cache_group("new-group")
+        body = {"currentItem": {"track": {"name": "Test song"}}}
+        for group_id in ("old-group", "new-group"):
+            response = self.client.post("/sonos/events", json=body, headers=self.event_headers(
+                namespace="playbackMetadata", event_type="metadataStatus",
+                target_type="groupId", target_value=group_id,
+            ))
+            self.assertEqual(response.status_code, 200)
+        self.routes.event_processor.process_metadata.assert_called_once()
+        self.assertEqual(self.routes.event_processor.process_metadata.call_args.args[0].group_id, "new-group")
+
+    def test_selection_changed_during_subscription_is_not_recorded_for_the_new_target(self):
+        self.select()
+        self.sonos_get.return_value = {"groups": [{"id": "old-target-group", "playerIds": ["player-1"]}]}
+
+        async def change_selection(url):
+            self.store.save_playback_target("household-1", "player-2")
+            return {}
+
+        self.sonos_post.side_effect = change_selection
+        self.client.post("/sonos/events", headers=self.event_headers(), json={})
+        self.assertEqual(self.store.load_playback_target()["player_id"], "player-2")
+        self.assertIsNone(self.store.load_playback_target()["group_id"])
+        self.assertEqual(self.store.list_playback_metadata_subscriptions(), [])
+
+    def test_renewal_cannot_reactivate_subscriptions_retired_by_reconciliation(self):
+        self.select()
+        self.cache_group("old-group")
+        self.store.save_playback_metadata_subscription("old-group")
+        with psycopg.connect(self.db_url) as conn:
+            conn.execute("update sonos_subscriptions set last_subscribed_at = now() - interval '3 days' where user_key = %s", (self.store.user_key,))
+        self.sonos_get.return_value = {"groups": [{"id": "new-group", "playerIds": ["player-1"]}]}
+
+        async def overlap():
+            self.routes.subscription_lock = asyncio.Lock()
+            renewer = PlaybackMetadataSubscriptionRenewer(
+                self.store, Mock(), lock=self.routes.subscription_lock
+            )
+            renewal_started = asyncio.Event()
+            release_renewal = asyncio.Event()
+
+            async def subscribe(url):
+                if "/old-group/" in url:
+                    renewal_started.set()
+                    await release_renewal.wait()
+                return {}
+
+            self.sonos_post.side_effect = subscribe
+            renewal = asyncio.create_task(renewer.renew_due())
+            await renewal_started.wait()
+            reconciliation = asyncio.create_task(self.routes.reconcile_household_groups("household-1"))
+            await asyncio.sleep(0)
+            self.sonos_get.assert_not_awaited()
+            release_renewal.set()
+            await asyncio.gather(renewal, reconciliation)
+
+        asyncio.run(asyncio.wait_for(overlap(), timeout=5))
+        subscriptions = {row["group_id"]: row["active"] for row in self.store.list_playback_metadata_subscriptions()}
+        self.assertEqual(subscriptions, {"old-group": False, "new-group": True})
+        self.assertEqual(self.store.list_due_playback_metadata_subscriptions(172800), [])
