@@ -35,7 +35,8 @@ saved in PostgreSQL without contacting Sonos, so an offline speaker can remain s
 The `sonos_playback_target` table is created on first use. No speaker is inferred
 from historical group IDs.
 
-After saving a selection, subscribe to its current group:
+The background worker discovers and subscribes to the saved speaker on startup
+and every five minutes. To subscribe immediately after saving a selection:
 
 ```http
 POST /sonos/playback-target/subscribe
@@ -46,7 +47,9 @@ groups from the saved household, finds the group whose
 `playerIds` contains the selected player, caches its full `id`, and subscribes to
 that group's `playbackMetadata`. The selected player does not need to be the
 group coordinator. The response lists both `groups` and `playbackMetadata` in
-`subscribed`. A metadata subscription record is saved only after Sonos accepts it.
+`subscribed`. Each subscription's successful timestamp is saved only after Sonos
+accepts that subscription. Household timestamps are stored by user and household
+in `sonos_groups_subscriptions`, which is created on first use.
 
 If the player is absent, the endpoint returns 404 and clears only the cached
 group; the selected household and player remain saved. Initial discovery failures
@@ -56,8 +59,8 @@ does not imply a successful subscription. Authorization failures use the existin
 with the reauthorization link. A missing selection or a selection changed during
 discovery or subscription returns 409.
 
-After deployment, call this endpoint once for an existing saved target to enable
-group-change notifications. Signed `groups` events for that household are
+The startup check also enables group-change notifications for existing saved
+targets. Signed `groups` events for that household are
 acknowledged before discovery or subscription calls begin. A background task
 fetches the latest groups and subscribes to the selected player's current group.
 It does not register another household subscription, so initial subscription
@@ -86,25 +89,36 @@ If discovery still returns the same gone ID, no second POST is sent. A second 41
 retires the replacement group too and ends the attempt. Other HTTP failures do not
 trigger group recovery. Failed rediscovery leaves the known gone group retired.
 
-If the selected speaker has no active subscription, the existing renewal loop
-retries it on a later pass, even when there are no due subscription rows. This also
-allows a newly selected or previously offline speaker to be subscribed. The
-existing check interval defaults to six hours; healthy subscriptions retain the
-48-hour renewal threshold. When a target is selected, renewal processes that one
-speaker instead of separately attempting every historical group ID.
+The existing renewal worker discovers the selected speaker's current group on
+every pass, even when no subscriptions are due. A changed group or a missing
+subscription is subscribed immediately. An unchanged, healthy subscription is
+left alone until its last successful subscription is 48 hours old. This catches
+missed group events and retries newly selected or previously offline speakers.
+Only the selected speaker and its household are processed, so historical groups
+and households are not resubscribed.
+
+Household `groups` subscriptions use the same 48-hour renewal threshold, with
+their own persisted timestamp. This renews both subscriptions before their
+three-day lifetime expires; see the
+[Sonos subscription lifecycle](https://docs.sonos.com/docs/subscribe).
+A household subscription failure does not prevent metadata discovery, and a
+discovery failure does not prevent household renewal. Failed attempts leave their
+subscription timestamps unchanged and are retried on a later pass.
+
+`SONOS_SUBSCRIPTION_RENEW_INTERVAL_SECONDS` controls the discovery/check interval
+(default `300`). `SONOS_PLAYBACK_METADATA_RENEW_AFTER_SECONDS` controls the renewal
+age for both subscription types (default `172800`). Existing explicit settings
+remain in effect. `POST /sonos/subscriptions/renew` runs the same check immediately;
+its `renewed` results can include `groups` records with a `household_id` and
+`playbackMetadata` records with a `group_id`.
 
 Without a saved playback target, renewal retires a group returning 410 but cannot
 choose a replacement speaker. The legacy `/sonos/subscribe/{group_id}` endpoint
 also retires a gone group and returns 410; it continues to address the explicit ID.
 Use `/sonos/playback-target/subscribe` for discovery and recovery.
 
-Background failures are logged. A later event, a renewal pass for a target without
-an active subscription, or another call to the subscribe endpoint can retry.
-General startup reconciliation, periodic discovery of otherwise active targets,
-and scheduled household subscription renewal remain for step 5.
-Until household renewal is added, call the subscribe endpoint again to refresh
-it before its three-day lifetime expires. See the
-[Sonos subscription lifecycle](https://docs.sonos.com/docs/subscribe).
+Background failures are logged. A later event, the next periodic check, or another
+call to the subscribe endpoint can retry.
 
 Run the persistence and API tests against a local test PostgreSQL database:
 
