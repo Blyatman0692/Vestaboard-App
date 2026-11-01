@@ -8,9 +8,14 @@ import hmac
 import httpx
 
 from app import build_sonos_container
-from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
+from sonos_app.sonos_client import SonosAPIError, SonosClient, SonosReauthorizationRequired
 from sonos_app.sonos_oauth_client import SonosAuthError
 from sonos_app.playback_metadata import parse_playback_metadata
+from sonos_app.playback_subscription import (
+    PlaybackTargetChanged,
+    PlaybackTargetUnavailable,
+    subscribe_target_metadata,
+)
 from sonos_app.subscription_renewer import PlaybackMetadataSubscriptionRenewer
 
 import logging
@@ -210,8 +215,8 @@ def verify_sonos_event_signature(
 async def reconcile_household_groups(household_id: str):
     try:
         await reconcile_playback_target(household_id)
-    except HTTPException as exc:
-        logger.info("Sonos group reconciliation skipped: %s", exc.detail)
+    except (PlaybackTargetChanged, PlaybackTargetUnavailable) as exc:
+        logger.info("Sonos group reconciliation skipped: %s", exc)
     except SonosReauthorizationRequired as exc:
         logger.warning("Sonos group reconciliation requires reauthorization: %s", exc)
     except Exception:
@@ -278,33 +283,15 @@ async def reconcile_playback_target(
         if target is None:
             raise HTTPException(status_code=409, detail="Select a Sonos playback target first.")
 
-        household_id, player_id = target["household_id"], target["player_id"]
+        household_id = target["household_id"]
         tokens = load_tokens_or_reauthorize()
         client = SonosClient(tokens, db_client, oauth_client)
         if subscribe_groups:
             await client.subscribe_groups(household_id)
-        group_id = await client.get_player_group_id(household_id, player_id)
-
-        if not db_client.update_playback_target_group(household_id, player_id, group_id):
-            raise HTTPException(
-                status_code=409,
-                detail="The selected Sonos playback target changed. Retry the subscription.",
-            )
-        if group_id is None:
-            raise HTTPException(
-                status_code=404,
-                detail="The selected Sonos player is not currently available in its household.",
-            )
-
-        await client.subscribe_playback_metadata(group_id)
-        # The selection may have changed while the subscription request was in flight.
-        current_target = db_client.load_playback_target()
-        if current_target != {**target, "group_id": group_id}:
-            raise HTTPException(status_code=409, detail="The selected Sonos playback target changed.")
-        subscription = db_client.save_playback_metadata_subscription(group_id)
+        subscription = await subscribe_target_metadata(client, db_client, target)
         return {
             "ok": True,
-            "group_id": group_id,
+            "group_id": subscription["group_id"],
             "subscribed": ["groups", "playbackMetadata"] if subscribe_groups else ["playbackMetadata"],
             "subscription": subscription,
         }
@@ -314,6 +301,10 @@ async def reconcile_playback_target(
 async def subscribe_playback_target(request: Request):
     try:
         return await reconcile_playback_target(subscribe_groups=True)
+    except PlaybackTargetChanged as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PlaybackTargetUnavailable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SonosReauthorizationRequired as exc:
         return reauthorization_response(request, str(exc))
     except (RuntimeError, httpx.HTTPError) as exc:
@@ -329,12 +320,20 @@ async def subscribe_group(group_id: str, request: Request):
 
     client = SonosClient(tokens, db_client, oauth_client)
 
-    try:
-        await client.subscribe_playback_metadata(group_id)
-    except SonosReauthorizationRequired as exc:
-        return reauthorization_response(request, str(exc))
+    async with subscription_lock:
+        try:
+            await client.subscribe_playback_metadata(group_id)
+        except SonosReauthorizationRequired as exc:
+            return reauthorization_response(request, str(exc))
+        except SonosAPIError as exc:
+            if exc.status_code == 410:
+                db_client.invalidate_playback_metadata_subscription(group_id)
+            raise HTTPException(
+                status_code=410 if exc.status_code == 410 else 502,
+                detail={"status_code": exc.status_code, "error_code": exc.error_code},
+            ) from exc
 
-    subscription = db_client.save_playback_metadata_subscription(group_id)
+        subscription = db_client.save_playback_metadata_subscription(group_id)
 
     return JSONResponse(
         {
