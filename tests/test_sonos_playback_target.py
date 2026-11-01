@@ -16,7 +16,7 @@ from psycopg.conninfo import make_conninfo
 
 from sonos_app.data_store import PostgresDataStore
 from sonos_app.config import SONOS_CONTROL_BASE_URL
-from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
+from sonos_app.sonos_client import SonosAPIError, SonosClient, SonosReauthorizationRequired
 from sonos_app.subscription_renewer import PlaybackMetadataSubscriptionRenewer
 from sonos_app.token import SonosToken
 
@@ -99,6 +99,26 @@ class PlaybackTargetTests(unittest.TestCase):
             awaited == call(f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription")
             for awaited in self.sonos_post.await_args_list
         ))
+
+    @staticmethod
+    def gone_error():
+        return SonosAPIError(410, '{"errorCode":"ERROR_RESOURCE_GONE"}')
+
+    @staticmethod
+    def discovered_group(group_id):
+        return {"groups": [{"id": group_id, "playerIds": ["player-1"]}]} if group_id else {"groups": []}
+
+    def make_subscriptions_due(self):
+        with psycopg.connect(self.db_url) as conn:
+            conn.execute(
+                "update sonos_subscriptions set last_subscribed_at = now() - interval '3 days' where user_key = %s",
+                (self.store.user_key,),
+            )
+
+    def renew(self):
+        renewer = PlaybackMetadataSubscriptionRenewer(self.store, Mock(), lock=self.routes.subscription_lock)
+        with patch("sonos_app.subscription_renewer.logger.exception"):
+            return asyncio.run(renewer.renew_due())
 
     def test_selection_persists_without_a_group_or_sonos_authorization(self):
         self.load_tokens.return_value = None
@@ -215,7 +235,7 @@ class PlaybackTargetTests(unittest.TestCase):
     def test_discovery_failure_preserves_the_cached_group(self):
         self.select()
         self.cache_group("last-known-group")
-        for error in (RuntimeError("Sonos API error 503"), httpx.ConnectError("Unavailable")):
+        for error in (SonosAPIError(503, "Unavailable"), httpx.ConnectError("Unavailable")):
             with self.subTest(error=error), patch.object(self.routes.logger, "exception"):
                 self.sonos_get.side_effect = error
 
@@ -229,7 +249,7 @@ class PlaybackTargetTests(unittest.TestCase):
     def test_failed_subscription_is_not_saved(self):
         self.select()
         self.sonos_get.return_value = {"groups": [{"id": "new-group", "playerIds": ["player-1"]}]}
-        self.sonos_post.side_effect = [{}, RuntimeError("Sonos API error 410")]
+        self.sonos_post.side_effect = [{}, SonosAPIError(503, "Unavailable")]
 
         with patch.object(self.routes.logger, "exception"):
             response = self.client.post("/sonos/playback-target/subscribe")
@@ -463,3 +483,212 @@ class PlaybackTargetTests(unittest.TestCase):
         subscriptions = {row["group_id"]: row["active"] for row in self.store.list_playback_metadata_subscriptions()}
         self.assertEqual(subscriptions, {"old-group": False, "new-group": True})
         self.assertEqual(self.store.list_due_playback_metadata_subscriptions(172800), [])
+
+    def test_manual_subscription_recovers_once_from_a_gone_group(self):
+        self.select()
+        self.cache_group("old-group")
+        self.store.save_playback_metadata_subscription("old-group")
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), self.discovered_group("new-group:456")]
+        self.sonos_post.side_effect = [{}, self.gone_error(), {}]
+
+        response = self.client.post("/sonos/playback-target/subscribe")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["group_id"], "new-group:456")
+        self.assertEqual(self.sonos_get.await_count, 2)
+        self.assertEqual(self.sonos_post.await_count, 3)
+        self.sonos_post.assert_awaited_with(f"{SONOS_CONTROL_BASE_URL}/groups/new-group:456/playbackMetadata/subscription")
+        self.assertEqual(self.store.load_playback_target()["group_id"], "new-group:456")
+        self.assertEqual(
+            {row["group_id"]: row["active"] for row in self.store.list_playback_metadata_subscriptions()},
+            {"old-group": False, "new-group:456": True},
+        )
+
+    def test_group_event_uses_the_same_bounded_gone_group_recovery(self):
+        self.select()
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), self.discovered_group("new-group")]
+        self.sonos_post.side_effect = [self.gone_error(), {}]
+
+        response = self.client.post("/sonos/events", headers=self.event_headers(), json={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.store.load_playback_target()["group_id"], "new-group")
+        self.assertEqual(self.sonos_post.await_count, 2)
+
+    def test_renewal_recovers_the_selected_player_without_retrying_historical_records(self):
+        self.select()
+        self.cache_group("old-group")
+        self.store.save_playback_metadata_subscription("old-group")
+        self.store.save_playback_metadata_subscription("historical-group")
+        self.make_subscriptions_due()
+        self.sonos_get.return_value = self.discovered_group("new-group")
+        self.sonos_post.side_effect = [self.gone_error(), {}]
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["reauthorization_required"])
+        self.assertEqual([row["group_id"] for row in result["renewed"]], ["new-group"])
+        self.assertEqual(result["failed"], [])
+        self.sonos_get.assert_awaited_once()
+        self.assertEqual(self.sonos_post.await_args_list, [
+            call(f"{SONOS_CONTROL_BASE_URL}/groups/old-group/playbackMetadata/subscription"),
+            call(f"{SONOS_CONTROL_BASE_URL}/groups/new-group/playbackMetadata/subscription"),
+        ])
+        self.assertEqual(
+            {row["group_id"]: row["active"] for row in self.store.list_playback_metadata_subscriptions()},
+            {"old-group": False, "historical-group": False, "new-group": True},
+        )
+
+    def test_a_second_gone_group_stops_recovery_and_clears_the_cache(self):
+        target = self.select()
+        for group_id in ("old-group", "new-group"):
+            self.store.save_playback_metadata_subscription(group_id)
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), self.discovered_group("new-group")]
+        self.sonos_post.side_effect = [{}, self.gone_error(), self.gone_error()]
+
+        with patch.object(self.routes.logger, "exception"):
+            response = self.client.post("/sonos/playback-target/subscribe")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(self.sonos_get.await_count, 2)
+        self.assertEqual(self.sonos_post.await_count, 3)
+        self.assertEqual(self.store.load_playback_target(), target)
+        self.assertTrue(all(not row["active"] for row in self.store.list_playback_metadata_subscriptions()))
+
+    def test_stale_discovery_never_retries_the_same_gone_group(self):
+        self.select()
+        self.store.save_playback_metadata_subscription("old-group")
+        self.sonos_get.return_value = self.discovered_group("old-group")
+        self.sonos_post.side_effect = [{}, self.gone_error()]
+
+        with patch.object(self.routes.logger, "exception"):
+            response = self.client.post("/sonos/playback-target/subscribe")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(self.sonos_get.await_count, 2)
+        self.assertEqual(self.sonos_post.await_count, 2)
+        self.assertIsNone(self.store.load_playback_target()["group_id"])
+        self.assertFalse(self.store.list_playback_metadata_subscriptions()[0]["active"])
+
+    def test_offline_recovery_retries_discovery_on_the_next_renewal_pass(self):
+        target = self.select()
+        self.store.save_playback_metadata_subscription("old-group")
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), self.discovered_group(None)]
+        self.sonos_post.side_effect = [{}, self.gone_error()]
+
+        response = self.client.post("/sonos/playback-target/subscribe")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.store.load_playback_target(), target)
+        self.assertEqual(self.store.list_due_playback_metadata_subscriptions(172800), [])
+        self.sonos_get.side_effect = None
+        self.sonos_get.return_value = self.discovered_group("returned-group")
+        self.sonos_post.side_effect = None
+        self.sonos_get.reset_mock()
+        self.sonos_post.reset_mock()
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["renewed"][0]["group_id"], "returned-group")
+        self.sonos_get.assert_awaited_once()
+        self.sonos_post.assert_awaited_once_with(f"{SONOS_CONTROL_BASE_URL}/groups/returned-group/playbackMetadata/subscription")
+
+    def test_rediscovery_failure_keeps_the_gone_group_retired(self):
+        self.select()
+        self.store.save_playback_metadata_subscription("old-group")
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), SonosAPIError(503, "Unavailable")]
+        self.sonos_post.side_effect = [{}, self.gone_error()]
+
+        with patch.object(self.routes.logger, "exception"):
+            response = self.client.post("/sonos/playback-target/subscribe")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIsNone(self.store.load_playback_target()["group_id"])
+        self.assertFalse(self.store.list_playback_metadata_subscriptions()[0]["active"])
+        self.assertEqual(self.sonos_post.await_count, 2)
+
+    def test_non_gone_api_errors_do_not_trigger_recovery_or_retirement(self):
+        self.select()
+        self.cache_group("current-group")
+        self.store.save_playback_metadata_subscription("current-group")
+        self.sonos_get.return_value = self.discovered_group("current-group")
+        for status_code in (403, 404, 429, 500, 503):
+            with self.subTest(status_code=status_code), patch.object(self.routes.logger, "exception"):
+                self.sonos_get.reset_mock()
+                self.sonos_post.reset_mock()
+                self.sonos_post.side_effect = [{}, SonosAPIError(status_code, "error")]
+
+                response = self.client.post("/sonos/playback-target/subscribe")
+
+                self.assertEqual(response.status_code, 502)
+                self.sonos_get.assert_awaited_once()
+                self.assertEqual(self.sonos_post.await_count, 2)
+                self.assertEqual(self.store.load_playback_target()["group_id"], "current-group")
+                self.assertTrue(self.store.list_playback_metadata_subscriptions()[0]["active"])
+
+    def test_healthy_subscription_is_not_renewed_before_it_is_due(self):
+        self.select()
+        self.cache_group("current-group")
+        self.store.save_playback_metadata_subscription("current-group")
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["due_count"], 0)
+        self.sonos_get.assert_not_awaited()
+        self.sonos_post.assert_not_awaited()
+
+    def test_legacy_renewal_retires_gone_groups_without_guessing_a_speaker(self):
+        self.store.save_playback_metadata_subscription("old-group")
+        self.make_subscriptions_due()
+        self.sonos_post.side_effect = self.gone_error()
+
+        result = self.renew()
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["reauthorization_required"])
+        self.assertEqual(result["failed"][0]["status_code"], 410)
+        self.assertEqual(result["failed"][0]["error_code"], "ERROR_RESOURCE_GONE")
+        self.assertFalse(self.store.list_playback_metadata_subscriptions()[0]["active"])
+        self.sonos_get.assert_not_awaited()
+        self.assertEqual(self.renew()["due_count"], 0)
+        self.sonos_post.assert_awaited_once()
+
+    def test_explicit_group_endpoint_retires_a_gone_group_and_reports_410(self):
+        self.store.save_playback_metadata_subscription("old-group")
+        self.sonos_post.side_effect = self.gone_error()
+
+        response = self.client.post("/sonos/subscribe/old-group")
+
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.json()["detail"]["error_code"], "ERROR_RESOURCE_GONE")
+        self.assertFalse(self.store.list_playback_metadata_subscriptions()[0]["active"])
+        self.sonos_get.assert_not_awaited()
+
+    def test_invalidation_is_scoped_to_the_user_and_failed_group(self):
+        self.select()
+        self.cache_group("current-group")
+        self.store.save_playback_metadata_subscription("old-group")
+        other_store = PostgresDataStore(self.db_url, uuid4().hex)
+        other_store.save_playback_target("household-1", "player-2")
+        other_store.update_playback_target_group("household-1", "player-2", "old-group")
+        other_subscription = other_store.save_playback_metadata_subscription("old-group")
+
+        self.store.invalidate_playback_metadata_subscription("old-group")
+
+        self.assertEqual(self.store.load_playback_target()["group_id"], "current-group")
+        self.assertEqual(other_store.load_playback_target()["group_id"], "old-group")
+        self.assertEqual(other_store.list_playback_metadata_subscriptions(), [other_subscription])
+
+    def test_reauthorization_during_recovery_is_not_reported_as_a_group_error(self):
+        self.select()
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), SonosReauthorizationRequired("Start OAuth again.")]
+        self.sonos_post.side_effect = [{}, self.gone_error()]
+
+        response = self.client.post("/sonos/playback-target/subscribe")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["reauthorize_path"], "/oauth/start")
+        self.assertIsNone(self.store.load_playback_target()["group_id"])
