@@ -85,7 +85,7 @@ class PostgresDataStore:
     def update_playback_target_group(
         self, household_id: str, player_id: str, group_id: str | None
     ) -> bool:
-        """Cache discovery only if the selected speaker has not changed."""
+        """Cache discovery and retire other subscriptions if the target is unchanged."""
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 self._ensure_playback_target_table(cur)
@@ -97,8 +97,20 @@ class PostgresDataStore:
                     """,
                     (group_id, self.user_key, household_id, player_id),
                 )
-                updated = cur.rowcount == 1
-        return updated
+                if cur.rowcount != 1:
+                    return False
+
+                self._ensure_subscriptions_table(cur)
+                cur.execute(
+                    """
+                    update sonos_subscriptions
+                    set active = false, updated_at = now()
+                    where user_key = %s and namespace = %s and active = true
+                      and group_id is distinct from %s
+                    """,
+                    (self.user_key, PLAYBACK_METADATA_NAMESPACE, group_id),
+                )
+        return True
 
     @staticmethod
     def _ensure_subscriptions_table(cur):
