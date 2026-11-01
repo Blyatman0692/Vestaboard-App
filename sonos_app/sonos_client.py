@@ -1,4 +1,5 @@
 import datetime
+import json
 import httpx
 
 from sonos_app.config import SONOS_CONTROL_BASE_URL
@@ -16,6 +17,18 @@ def _utcnow():
 
 class SonosReauthorizationRequired(RuntimeError):
     pass
+
+
+class SonosAPIError(RuntimeError):
+    def __init__(self, status_code: int, body: str):
+        self.status_code = status_code
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = None
+        error_code = payload.get("errorCode") if isinstance(payload, dict) else None
+        self.error_code = error_code if isinstance(error_code, str) else None
+        super().__init__(f"Sonos API error {status_code}: {body}")
 
 
 class SonosClient:
@@ -168,8 +181,7 @@ class SonosClient:
 
         # Handle remaining errors
         if resp.status_code >= 400:
-            raise RuntimeError(
-                f"Sonos API error {resp.status_code}: {resp.text}")
+            raise SonosAPIError(resp.status_code, resp.text)
 
         return resp.json()
 
@@ -196,7 +208,6 @@ class SonosClient:
             )
 
         if resp.status_code >= 400:
-            raise RuntimeError(
-                f"Sonos API error {resp.status_code}: {resp.text}")
+            raise SonosAPIError(resp.status_code, resp.text)
 
         return resp.json() if resp.text else {}
