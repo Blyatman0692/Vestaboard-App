@@ -39,9 +39,11 @@ class PlaybackMetadataSubscriptionRenewer:
         *,
         renew_after_seconds: int | None = None,
         interval_seconds: int | None = None,
+        lock: asyncio.Lock | None = None,
     ):
         self.data_store = data_store
         self.oauth_client = oauth_client
+        self._lock = lock if lock is not None else asyncio.Lock()
         self.renew_after_seconds = renew_after_seconds or _positive_int_env(
             "SONOS_PLAYBACK_METADATA_RENEW_AFTER_SECONDS",
             DEFAULT_RENEW_AFTER_SECONDS,
@@ -52,6 +54,10 @@ class PlaybackMetadataSubscriptionRenewer:
         )
 
     async def renew_due(self):
+        async with self._lock:
+            return await self._renew_due()
+
+    async def _renew_due(self):
         due_subscriptions = self.data_store.list_due_playback_metadata_subscriptions(
             self.renew_after_seconds
         )
