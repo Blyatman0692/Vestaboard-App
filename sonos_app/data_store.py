@@ -224,6 +224,28 @@ class PostgresDataStore:
             "last_subscribed_at": self._isoformat(last_subscribed_at),
         }
 
+    def invalidate_playback_metadata_subscription(self, group_id: str):
+        """Retire a gone group and clear its cached ID without losing the speaker."""
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_playback_target_table(cur)
+                self._ensure_subscriptions_table(cur)
+                cur.execute(
+                    """
+                    update sonos_playback_target set group_id = null
+                    where user_key = %s and group_id = %s
+                    """,
+                    (self.user_key, group_id),
+                )
+                cur.execute(
+                    """
+                    update sonos_subscriptions set active = false, updated_at = now()
+                    where user_key = %s and group_id = %s and namespace = %s
+                      and active = true
+                    """,
+                    (self.user_key, group_id, PLAYBACK_METADATA_NAMESPACE),
+                )
+
     def list_playback_metadata_subscriptions(self):
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
