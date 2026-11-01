@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, PlainTextResponse, JSONResponse
+from pydantic import BaseModel, Field
 import asyncio
 import base64
 import hashlib
+import httpx
 
 from app import build_sonos_container
 from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
@@ -28,6 +30,11 @@ event_processor = container.sonos_event_processor
 sonos_config = container.config
 subscription_renewer = PlaybackMetadataSubscriptionRenewer(db_client, oauth_client)
 subscription_renewer_task: asyncio.Task | None = None
+
+
+class PlaybackTargetRequest(BaseModel):
+    household_id: str = Field(min_length=1, pattern=r"^\S+$")
+    player_id: str = Field(min_length=1, pattern=r"^\S+$")
 
 
 def reauthorization_payload(request: Request, detail: str) -> dict[str, str | bool]:
@@ -219,6 +226,56 @@ async def sonos_events(request: Request):
     print(metadata)
 
     return JSONResponse({"ok": True})
+
+@app.get("/sonos/playback-target")
+def get_playback_target():
+    return {"ok": True, "target": db_client.load_playback_target()}
+
+
+@app.put("/sonos/playback-target")
+def set_playback_target(target: PlaybackTargetRequest):
+    saved_target = db_client.save_playback_target(target.household_id, target.player_id)
+    return {"ok": True, "target": saved_target}
+
+
+@app.post("/sonos/playback-target/subscribe")
+async def subscribe_playback_target(request: Request):
+    target = db_client.load_playback_target()
+    if target is None:
+        raise HTTPException(status_code=409, detail="Select a Sonos playback target first.")
+
+    household_id, player_id = target["household_id"], target["player_id"]
+    try:
+        tokens = load_tokens_or_reauthorize()
+        client = SonosClient(tokens, db_client, oauth_client)
+        group_id = await client.get_player_group_id(household_id, player_id)
+
+        if not db_client.update_playback_target_group(household_id, player_id, group_id):
+            raise HTTPException(
+                status_code=409,
+                detail="The selected Sonos playback target changed. Retry the subscription.",
+            )
+        if group_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail="The selected Sonos player is not currently available in its household.",
+            )
+
+        await client.subscribe_playback_metadata(group_id)
+    except SonosReauthorizationRequired as exc:
+        return reauthorization_response(request, str(exc))
+    except (RuntimeError, httpx.HTTPError) as exc:
+        logger.exception("Failed to subscribe the selected Sonos playback target")
+        raise HTTPException(status_code=502, detail="Sonos discovery or subscription failed.") from exc
+
+    subscription = db_client.save_playback_metadata_subscription(group_id)
+    return {
+        "ok": True,
+        "group_id": group_id,
+        "subscribed": ["playbackMetadata"],
+        "subscription": subscription,
+    }
+
 
 @app.post("/sonos/subscribe/{group_id}")
 async def subscribe_group(group_id: str, request: Request):
