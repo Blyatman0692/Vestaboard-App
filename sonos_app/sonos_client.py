@@ -45,6 +45,10 @@ class SonosClient:
                 return group["id"]
         return None
 
+    async def subscribe_groups(self, household_id: str):
+        url = f"{SONOS_CONTROL_BASE_URL}/households/{household_id}/groups/subscription"
+        return await self._post_json(url)
+
     async def subscribe_playback(self, group_id: str):
         url = f"{SONOS_CONTROL_BASE_URL}/groups/{group_id}/playback/subscription"
 
