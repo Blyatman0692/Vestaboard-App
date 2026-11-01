@@ -2,8 +2,9 @@ import asyncio
 import logging
 import os
 
-from sonos_app.data_store import PostgresDataStore
-from sonos_app.sonos_client import SonosClient, SonosReauthorizationRequired
+from sonos_app.data_store import PLAYBACK_METADATA_NAMESPACE, PostgresDataStore
+from sonos_app.playback_subscription import subscribe_target_metadata
+from sonos_app.sonos_client import SonosAPIError, SonosClient, SonosReauthorizationRequired
 from sonos_app.sonos_oauth_client import SonosOAuthClient
 
 
@@ -61,6 +62,18 @@ class PlaybackMetadataSubscriptionRenewer:
         due_subscriptions = self.data_store.list_due_playback_metadata_subscriptions(
             self.renew_after_seconds
         )
+        target = self.data_store.load_playback_target()
+        if target is not None:
+            has_subscription = any(
+                subscription["active"] and subscription["group_id"] == target["group_id"]
+                for subscription in self.data_store.list_playback_metadata_subscriptions()
+            )
+            # A gone group is retired immediately. Keep retrying the saved speaker
+            # on later passes even when there are no active subscriptions left.
+            due_subscriptions = (
+                [{"group_id": target["group_id"], "namespace": PLAYBACK_METADATA_NAMESPACE}]
+                if due_subscriptions or not has_subscription else []
+            )
         if not due_subscriptions:
             return {
                 "ok": True,
@@ -90,10 +103,18 @@ class PlaybackMetadataSubscriptionRenewer:
         for subscription in due_subscriptions:
             group_id = subscription["group_id"]
             try:
-                await client.subscribe_playback_metadata(group_id)
-                renewed.append(
-                    self.data_store.save_playback_metadata_subscription(group_id)
-                )
+                if target is not None:
+                    renewed.append(await subscribe_target_metadata(
+                        client, self.data_store, target, group_id=group_id
+                    ))
+                else:
+                    try:
+                        await client.subscribe_playback_metadata(group_id)
+                    except SonosAPIError as exc:
+                        if exc.status_code == 410:
+                            self.data_store.invalidate_playback_metadata_subscription(group_id)
+                        raise
+                    renewed.append(self.data_store.save_playback_metadata_subscription(group_id))
             except SonosReauthorizationRequired as exc:
                 return {
                     "ok": False,
@@ -109,13 +130,14 @@ class PlaybackMetadataSubscriptionRenewer:
                     "Failed to renew Sonos playback metadata subscription for group %s",
                     group_id,
                 )
-                failed.append(
-                    {
-                        "group_id": group_id,
-                        "namespace": subscription["namespace"],
-                        "error": str(exc),
-                    }
-                )
+                failure = {
+                    "group_id": group_id,
+                    "namespace": subscription["namespace"],
+                    "error": str(exc),
+                }
+                if isinstance(exc, SonosAPIError):
+                    failure.update(status_code=exc.status_code, error_code=exc.error_code)
+                failed.append(failure)
 
         return {
             "ok": not failed,
