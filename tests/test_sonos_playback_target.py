@@ -217,6 +217,7 @@ class PlaybackTargetTests(unittest.TestCase):
             f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription"
         ))
         self.assertEqual(response.json()["subscribed"], ["groups", "playbackMetadata"])
+        self.assertFalse(self.store.groups_subscription_due("household-1", 172800))
 
     def test_absent_player_clears_cached_group_without_changing_the_selection(self):
         target = self.select()
@@ -451,10 +452,11 @@ class PlaybackTargetTests(unittest.TestCase):
     def test_renewal_cannot_reactivate_subscriptions_retired_by_reconciliation(self):
         self.select()
         self.cache_group("old-group")
+        self.store.save_groups_subscription("household-1")
         self.store.save_playback_metadata_subscription("old-group")
         with psycopg.connect(self.db_url) as conn:
             conn.execute("update sonos_subscriptions set last_subscribed_at = now() - interval '3 days' where user_key = %s", (self.store.user_key,))
-        self.sonos_get.return_value = {"groups": [{"id": "new-group", "playerIds": ["player-1"]}]}
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), self.discovered_group("new-group")]
 
         async def overlap():
             self.routes.subscription_lock = asyncio.Lock()
@@ -475,7 +477,7 @@ class PlaybackTargetTests(unittest.TestCase):
             await renewal_started.wait()
             reconciliation = asyncio.create_task(self.routes.reconcile_household_groups("household-1"))
             await asyncio.sleep(0)
-            self.sonos_get.assert_not_awaited()
+            self.assertEqual(self.sonos_get.await_count, 1)
             release_renewal.set()
             await asyncio.gather(renewal, reconciliation)
 
@@ -518,10 +520,11 @@ class PlaybackTargetTests(unittest.TestCase):
     def test_renewal_recovers_the_selected_player_without_retrying_historical_records(self):
         self.select()
         self.cache_group("old-group")
+        self.store.save_groups_subscription("household-1")
         self.store.save_playback_metadata_subscription("old-group")
         self.store.save_playback_metadata_subscription("historical-group")
         self.make_subscriptions_due()
-        self.sonos_get.return_value = self.discovered_group("new-group")
+        self.sonos_get.side_effect = [self.discovered_group("old-group"), self.discovered_group("new-group")]
         self.sonos_post.side_effect = [self.gone_error(), {}]
 
         result = self.renew()
@@ -530,7 +533,7 @@ class PlaybackTargetTests(unittest.TestCase):
         self.assertFalse(result["reauthorization_required"])
         self.assertEqual([row["group_id"] for row in result["renewed"]], ["new-group"])
         self.assertEqual(result["failed"], [])
-        self.sonos_get.assert_awaited_once()
+        self.assertEqual(self.sonos_get.await_count, 2)
         self.assertEqual(self.sonos_post.await_args_list, [
             call(f"{SONOS_CONTROL_BASE_URL}/groups/old-group/playbackMetadata/subscription"),
             call(f"{SONOS_CONTROL_BASE_URL}/groups/new-group/playbackMetadata/subscription"),
@@ -631,14 +634,184 @@ class PlaybackTargetTests(unittest.TestCase):
     def test_healthy_subscription_is_not_renewed_before_it_is_due(self):
         self.select()
         self.cache_group("current-group")
-        self.store.save_playback_metadata_subscription("current-group")
+        subscription = self.store.save_playback_metadata_subscription("current-group")
+        self.store.save_groups_subscription("household-1")
+        self.sonos_get.return_value = self.discovered_group("current-group")
 
         result = self.renew()
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["due_count"], 0)
-        self.sonos_get.assert_not_awaited()
+        self.sonos_get.assert_awaited_once()
         self.sonos_post.assert_not_awaited()
+        self.assertEqual(self.store.list_playback_metadata_subscriptions(), [subscription])
+
+    def test_periodic_discovery_recovers_a_missed_group_event_before_renewal_is_due(self):
+        self.select()
+        self.cache_group("old-group")
+        self.store.save_playback_metadata_subscription("old-group")
+        self.store.save_groups_subscription("household-1")
+        self.sonos_get.return_value = self.discovered_group("new-group")
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["due_count"], 1)
+        self.assertEqual(self.store.load_playback_target()["group_id"], "new-group")
+        self.assertEqual(
+            {row["group_id"]: row["active"] for row in self.store.list_playback_metadata_subscriptions()},
+            {"old-group": False, "new-group": True},
+        )
+        self.assertEqual(self.renew()["due_count"], 0)
+        self.assertEqual(self.sonos_get.await_count, 2)
+        self.sonos_post.assert_awaited_once_with(
+            f"{SONOS_CONTROL_BASE_URL}/groups/new-group/playbackMetadata/subscription"
+        )
+
+    def test_periodic_discovery_subscribes_a_new_selection_without_manual_setup(self):
+        self.select()
+        self.sonos_get.return_value = self.discovered_group("current-group")
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["due_count"], 2)
+        self.assertEqual([row["namespace"] for row in result["renewed"]], ["groups", "playbackMetadata"])
+        self.assertEqual(self.store.load_playback_target()["group_id"], "current-group")
+        self.assertFalse(self.store.groups_subscription_due("household-1", 172800))
+        self.assertEqual(self.sonos_post.await_args_list, [
+            call(f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription"),
+            call(f"{SONOS_CONTROL_BASE_URL}/groups/current-group/playbackMetadata/subscription"),
+        ])
+
+    def test_household_subscription_persists_and_is_scoped_to_the_user_and_household(self):
+        self.assertTrue(self.store.groups_subscription_due("household-1", 172800))
+        subscription = self.store.save_groups_subscription("household-1")
+        reopened_store = PostgresDataStore(self.db_url, self.store.user_key)
+        other_store = PostgresDataStore(self.db_url, uuid4().hex)
+
+        self.assertEqual(subscription["household_id"], "household-1")
+        self.assertEqual(subscription["namespace"], "groups")
+        self.assertIsNotNone(subscription["last_subscribed_at"])
+        self.assertFalse(reopened_store.groups_subscription_due("household-1", 172800))
+        self.assertTrue(reopened_store.groups_subscription_due("household-2", 172800))
+        self.assertTrue(other_store.groups_subscription_due("household-1", 172800))
+
+    def test_household_and_metadata_renewal_ages_are_independent(self):
+        self.select()
+        self.cache_group("current-group")
+        metadata_subscription = self.store.save_playback_metadata_subscription("current-group")
+        self.store.save_groups_subscription("household-1")
+        self.sonos_get.return_value = self.discovered_group("current-group")
+        with psycopg.connect(self.db_url) as conn:
+            conn.execute(
+                "update sonos_groups_subscriptions set last_subscribed_at = now() - interval '2 days' where user_key = %s",
+                (self.store.user_key,),
+            )
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["due_count"], 1)
+        self.assertEqual([row["namespace"] for row in result["renewed"]], ["groups"])
+        self.sonos_post.assert_awaited_once_with(
+            f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription"
+        )
+        self.assertFalse(self.store.groups_subscription_due("household-1", 172800))
+        self.assertEqual(self.store.list_playback_metadata_subscriptions(), [metadata_subscription])
+
+        self.make_subscriptions_due()
+        self.sonos_post.reset_mock()
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["due_count"], 1)
+        self.assertEqual([row["namespace"] for row in result["renewed"]], ["playbackMetadata"])
+        self.sonos_post.assert_awaited_once_with(
+            f"{SONOS_CONTROL_BASE_URL}/groups/current-group/playbackMetadata/subscription"
+        )
+
+    def test_failed_household_subscription_does_not_block_discovery_and_is_retried(self):
+        self.select()
+        self.sonos_get.return_value = self.discovered_group("current-group")
+        self.sonos_post.side_effect = [SonosAPIError(503, "Unavailable"), {}, {}]
+
+        result = self.renew()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failed"], [{
+            "household_id": "household-1", "namespace": "groups",
+            "error": "Sonos API error 503: Unavailable", "status_code": 503, "error_code": None,
+        }])
+        self.assertTrue(self.store.groups_subscription_due("household-1", 172800))
+        self.assertEqual(self.store.load_playback_target()["group_id"], "current-group")
+        self.assertEqual([row["namespace"] for row in result["renewed"]], ["playbackMetadata"])
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["due_count"], 1)
+        self.assertEqual([row["namespace"] for row in result["renewed"]], ["groups"])
+        self.assertFalse(self.store.groups_subscription_due("household-1", 172800))
+        self.assertEqual(self.sonos_post.await_count, 3)
+
+    def test_discovery_failure_preserves_metadata_and_does_not_block_household_renewal(self):
+        self.select()
+        self.cache_group("current-group")
+        subscription = self.store.save_playback_metadata_subscription("current-group")
+        self.sonos_get.side_effect = SonosAPIError(503, "Unavailable")
+
+        result = self.renew()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failed"][0]["namespace"], "playbackMetadata")
+        self.assertFalse(self.store.groups_subscription_due("household-1", 172800))
+        self.assertEqual(self.store.load_playback_target()["group_id"], "current-group")
+        self.assertEqual(self.store.list_playback_metadata_subscriptions(), [subscription])
+        self.sonos_post.assert_awaited_once_with(
+            f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription"
+        )
+
+    def test_periodic_discovery_recovers_an_offline_speaker_without_a_group_event(self):
+        target = self.select()
+        self.cache_group("old-group")
+        self.store.save_playback_metadata_subscription("old-group")
+
+        result = self.renew()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.store.load_playback_target(), target)
+        self.assertFalse(self.store.list_playback_metadata_subscriptions()[0]["active"])
+        self.assertFalse(self.store.groups_subscription_due("household-1", 172800))
+        self.sonos_get.return_value = self.discovered_group("returned-group")
+        self.sonos_post.reset_mock()
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.store.load_playback_target()["group_id"], "returned-group")
+        self.sonos_post.assert_awaited_once_with(
+            f"{SONOS_CONTROL_BASE_URL}/groups/returned-group/playbackMetadata/subscription"
+        )
+
+    def test_periodic_renewal_only_subscribes_to_the_selected_household(self):
+        self.store.save_groups_subscription("old-household")
+        with psycopg.connect(self.db_url) as conn:
+            conn.execute(
+                "update sonos_groups_subscriptions set last_subscribed_at = now() - interval '3 days' where user_key = %s",
+                (self.store.user_key,),
+            )
+        self.select()
+        self.sonos_get.return_value = self.discovered_group("current-group")
+
+        result = self.renew()
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(self.store.groups_subscription_due("old-household", 172800))
+        self.assertEqual(self.sonos_post.await_args_list, [
+            call(f"{SONOS_CONTROL_BASE_URL}/households/household-1/groups/subscription"),
+            call(f"{SONOS_CONTROL_BASE_URL}/groups/current-group/playbackMetadata/subscription"),
+        ])
 
     def test_legacy_renewal_retires_gone_groups_without_guessing_a_speaker(self):
         self.store.save_playback_metadata_subscription("old-group")
