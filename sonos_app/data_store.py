@@ -129,6 +129,55 @@ class PostgresDataStore:
             """
         )
 
+    @staticmethod
+    def _ensure_groups_subscriptions_table(cur):
+        cur.execute(
+            """
+            create table if not exists sonos_groups_subscriptions (
+              user_key text not null,
+              household_id text not null,
+              last_subscribed_at timestamp with time zone not null default now(),
+              primary key (user_key, household_id)
+            )
+            """
+        )
+
+    def save_groups_subscription(self, household_id: str):
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_groups_subscriptions_table(cur)
+                cur.execute(
+                    """
+                    insert into sonos_groups_subscriptions (user_key, household_id)
+                    values (%s, %s)
+                    on conflict (user_key, household_id) do update set
+                      last_subscribed_at = now()
+                    returning last_subscribed_at
+                    """,
+                    (self.user_key, household_id),
+                )
+                last_subscribed_at, = cur.fetchone()
+        return {
+            "household_id": household_id,
+            "namespace": "groups",
+            "last_subscribed_at": self._isoformat(last_subscribed_at),
+        }
+
+    def groups_subscription_due(self, household_id: str, renew_after_seconds: int) -> bool:
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                self._ensure_groups_subscriptions_table(cur)
+                cur.execute(
+                    """
+                    select last_subscribed_at <= now() - (%s * interval '1 second')
+                    from sonos_groups_subscriptions
+                    where user_key = %s and household_id = %s
+                    """,
+                    (renew_after_seconds, self.user_key, household_id),
+                )
+                row = cur.fetchone()
+        return row is None or row[0]
+
     def save_tokens(self, tokens: dict[str, str]):
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
