@@ -11,7 +11,7 @@ from sonos_app.sonos_oauth_client import SonosOAuthClient
 logger = logging.getLogger(__name__)
 
 DEFAULT_RENEW_AFTER_SECONDS = 2 * 24 * 60 * 60
-DEFAULT_RENEWAL_INTERVAL_SECONDS = 6 * 60 * 60
+DEFAULT_RENEWAL_INTERVAL_SECONDS = 5 * 60
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -59,105 +59,97 @@ class PlaybackMetadataSubscriptionRenewer:
             return await self._renew_due()
 
     async def _renew_due(self):
-        due_subscriptions = self.data_store.list_due_playback_metadata_subscriptions(
-            self.renew_after_seconds
-        )
+        result = {
+            "ok": True,
+            "reauthorization_required": False,
+            "renew_after_seconds": self.renew_after_seconds,
+            "due_count": 0,
+            "renewed": [],
+            "failed": [],
+        }
         target = self.data_store.load_playback_target()
         if target is not None:
-            has_subscription = any(
-                subscription["active"] and subscription["group_id"] == target["group_id"]
-                for subscription in self.data_store.list_playback_metadata_subscriptions()
+            # Discovery runs on every pass, even when neither subscription is due.
+            subscriptions = [
+                {"household_id": target["household_id"], "namespace": "groups"},
+                {"group_id": target["group_id"], "namespace": PLAYBACK_METADATA_NAMESPACE},
+            ]
+        else:
+            subscriptions = self.data_store.list_due_playback_metadata_subscriptions(
+                self.renew_after_seconds
             )
-            # A gone group is retired immediately. Keep retrying the saved speaker
-            # on later passes even when there are no active subscriptions left.
-            due_subscriptions = (
-                [{"group_id": target["group_id"], "namespace": PLAYBACK_METADATA_NAMESPACE}]
-                if due_subscriptions or not has_subscription else []
-            )
-        if not due_subscriptions:
-            return {
-                "ok": True,
-                "reauthorization_required": False,
-                "renew_after_seconds": self.renew_after_seconds,
-                "due_count": 0,
-                "renewed": [],
-                "failed": [],
-            }
+        if not subscriptions:
+            return result
 
         tokens = self.data_store.load_tokens()
         if not tokens or not tokens.refresh_token:
-            return {
-                "ok": False,
-                "reauthorization_required": True,
-                "detail": "No usable Sonos authorization was found. Start OAuth again.",
-                "renew_after_seconds": self.renew_after_seconds,
-                "due_count": len(due_subscriptions),
-                "renewed": [],
-                "failed": [],
-            }
+            result.update(
+                ok=False,
+                reauthorization_required=True,
+                detail="No usable Sonos authorization was found. Start OAuth again.",
+            )
+            return result
 
         client = SonosClient(tokens, self.data_store, self.oauth_client)
-        renewed = []
-        failed = []
 
-        for subscription in due_subscriptions:
-            group_id = subscription["group_id"]
+        for subscription in subscriptions:
             try:
-                if target is not None:
-                    renewed.append(await subscribe_target_metadata(
-                        client, self.data_store, target, group_id=group_id
-                    ))
+                if subscription["namespace"] == "groups":
+                    household_id = subscription["household_id"]
+                    if not self.data_store.groups_subscription_due(household_id, self.renew_after_seconds):
+                        continue
+                    result["due_count"] += 1
+                    await client.subscribe_groups(household_id)
+                    renewed = self.data_store.save_groups_subscription(household_id)
+                elif target is not None:
+                    result["due_count"] += 1
+                    renewed = await subscribe_target_metadata(
+                        client, self.data_store, target,
+                        renew_after_seconds=self.renew_after_seconds,
+                    )
+                    if renewed is None:
+                        result["due_count"] -= 1
+                        continue
                 else:
+                    result["due_count"] += 1
+                    group_id = subscription["group_id"]
                     try:
                         await client.subscribe_playback_metadata(group_id)
                     except SonosAPIError as exc:
                         if exc.status_code == 410:
                             self.data_store.invalidate_playback_metadata_subscription(group_id)
                         raise
-                    renewed.append(self.data_store.save_playback_metadata_subscription(group_id))
+                    renewed = self.data_store.save_playback_metadata_subscription(group_id)
+                result["renewed"].append(renewed)
             except SonosReauthorizationRequired as exc:
-                return {
-                    "ok": False,
-                    "reauthorization_required": True,
-                    "detail": str(exc),
-                    "renew_after_seconds": self.renew_after_seconds,
-                    "due_count": len(due_subscriptions),
-                    "renewed": renewed,
-                    "failed": failed,
-                }
+                result.update(ok=False, reauthorization_required=True, detail=str(exc))
+                return result
             except Exception as exc:
                 logger.exception(
-                    "Failed to renew Sonos playback metadata subscription for group %s",
-                    group_id,
+                    "Failed to reconcile Sonos subscription: %s", subscription,
                 )
                 failure = {
-                    "group_id": group_id,
+                    **{key: subscription[key] for key in ("group_id", "household_id") if key in subscription},
                     "namespace": subscription["namespace"],
                     "error": str(exc),
                 }
                 if isinstance(exc, SonosAPIError):
                     failure.update(status_code=exc.status_code, error_code=exc.error_code)
-                failed.append(failure)
+                result["failed"].append(failure)
 
-        return {
-            "ok": not failed,
-            "reauthorization_required": False,
-            "renew_after_seconds": self.renew_after_seconds,
-            "due_count": len(due_subscriptions),
-            "renewed": renewed,
-            "failed": failed,
-        }
+        result["ok"] = not result["failed"]
+        return result
 
     async def run_forever(self):
         logger.info(
-            "Starting Sonos playback metadata renewal loop every %s seconds",
+            "Starting Sonos discovery and subscription renewal checks every %s seconds",
             self.interval_seconds,
         )
 
         while True:
             try:
                 result = await self.renew_due()
-                if result["due_count"] or result["failed"]:
+                if result["due_count"] or result["failed"] or result["reauthorization_required"]:
                     logger.info("Sonos subscription renewal result: %s", result)
             except asyncio.CancelledError:
                 raise
