@@ -32,8 +32,8 @@ it is not a field clients set. Saving the same selection preserves the cached
 group. Changing either the household or player clears it. The selection is
 saved in PostgreSQL without contacting Sonos, so an offline speaker can remain selected.
 
-The `sonos_playback_target` table is created on first use. Existing subscriptions
-are retained, and no speaker is inferred from historical group IDs.
+The `sonos_playback_target` table is created on first use. No speaker is inferred
+from historical group IDs.
 
 After saving a selection, subscribe to its current group:
 
@@ -41,10 +41,12 @@ After saving a selection, subscribe to its current group:
 POST /sonos/playback-target/subscribe
 ```
 
-Each call gets fresh groups from the saved household, finds the group whose
+Each call first subscribes to the household's `groups` events, then gets fresh
+groups from the saved household, finds the group whose
 `playerIds` contains the selected player, caches its full `id`, and subscribes to
 that group's `playbackMetadata`. The selected player does not need to be the
-group coordinator. A subscription record is saved only after Sonos accepts it.
+group coordinator. The response lists both `groups` and `playbackMetadata` in
+`subscribed`. A metadata subscription record is saved only after Sonos accepts it.
 
 If the player is absent, the endpoint returns 404 and clears only the cached
 group; the selected household and player remain saved. Discovery failures return
@@ -52,12 +54,35 @@ group; the selected household and player remain saved. Discovery failures return
 the cache retains the group just discovered: a cached group does not imply a
 successful subscription. Authorization failures use the existing 401 response
 with the reauthorization link. A missing selection or a selection changed during
-discovery returns 409.
+discovery or subscription returns 409.
 
-This endpoint performs discovery and subscription on demand. Group-change events,
-retiring obsolete subscriptions, and automatic recovery belong to later steps.
-The existing `/sonos/subscribe/{group_id}` and renewal endpoints still behave as
-before.
+After deployment, call this endpoint once for an existing saved target to enable
+group-change notifications. Signed `groups` events for that household are
+acknowledged before discovery or subscription calls begin. A background task
+fetches the latest groups and subscribes to the selected player's current group.
+It does not register another household subscription, so initial subscription
+events do not cause a resubscription loop. Events for other households are ignored.
+
+When discovery succeeds, the cached group is updated and all other
+`playbackMetadata` subscription records for this user are marked inactive in the
+same transaction. This includes historical records from before player selection
+was introduced. With a selected target, only its current group is followed; other
+users and other namespaces are unaffected. If the player is absent, all of this
+user's metadata subscriptions become inactive while the selection is preserved.
+A later group event can restore its subscription when the player returns.
+
+Inactive records are excluded from renewal. Remote subscriptions are left to
+expire, and metadata from groups other than the selected player's cached group
+is ignored. Background reconciliation and the renewal loop share a lock within
+the web process to prevent overlapping subscription updates. The provided
+`Procfile` runs one web worker; this lock does not coordinate multiple processes.
+
+Background failures are logged. A later event or another call to the subscribe
+endpoint can retry. Automatic 410 recovery, startup reconciliation, periodic
+discovery, and scheduled household subscription renewal remain for later steps.
+Until household renewal is added, call the subscribe endpoint again to refresh
+it before its three-day lifetime expires. See the
+[Sonos subscription lifecycle](https://docs.sonos.com/docs/subscribe).
 
 Run the persistence and API tests against a local test PostgreSQL database:
 
