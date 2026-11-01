@@ -15,13 +15,15 @@ async def subscribe_target_metadata(
     data_store: PostgresDataStore,
     target: dict,
     *,
-    group_id: str | None = None,
+    renew_after_seconds: int | None = None,
 ):
     """Subscribe to the selected speaker, rediscovering once after a gone group.
 
-    Callers hold the shared subscription lock for this operation.
+    Callers hold the shared subscription lock for this operation. Periodic checks
+    supply a renewal age to skip a healthy, unchanged subscription and return None.
     """
     household_id, player_id = target["household_id"], target["player_id"]
+    group_id = None
     gone_group_id = None
     gone_error = None
 
@@ -38,6 +40,18 @@ async def subscribe_target_metadata(
             raise PlaybackTargetUnavailable(
                 "The selected Sonos player is not currently available in its household."
             )
+
+        if renew_after_seconds is not None and group_id == target["group_id"]:
+            has_subscription = any(
+                subscription["active"] and subscription["group_id"] == group_id
+                for subscription in data_store.list_playback_metadata_subscriptions()
+            )
+            renewal_due = any(
+                subscription["group_id"] == group_id
+                for subscription in data_store.list_due_playback_metadata_subscriptions(renew_after_seconds)
+            )
+            if has_subscription and not renewal_due:
+                return None
 
         try:
             await client.subscribe_playback_metadata(group_id)
