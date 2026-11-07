@@ -62,9 +62,12 @@ discovery or subscription returns 409.
 The startup check also enables group-change notifications for existing saved
 targets. Signed `groups` events for that household are
 acknowledged before discovery or subscription calls begin. A background task
-fetches the latest groups and subscribes to the selected player's current group.
-It does not register another household subscription, so initial subscription
-events do not cause a resubscription loop. Events for other households are ignored.
+fetches the latest groups and subscribes only if the selected player's group has
+changed, its metadata subscription is missing or inactive, or renewal is due.
+It uses the same configured renewal age as the periodic worker, leaving healthy
+subscriptions and their timestamps unchanged. It does not register another
+household subscription. Events for other households are ignored. The manual
+subscribe endpoint still subscribes immediately, regardless of renewal age.
 
 When discovery succeeds, the cached group is updated and all other
 `playbackMetadata` subscription records for this user are marked inactive in the
