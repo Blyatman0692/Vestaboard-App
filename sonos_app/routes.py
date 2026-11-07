@@ -10,7 +10,7 @@ import httpx
 from app import build_sonos_container
 from sonos_app.sonos_client import SonosAPIError, SonosClient, SonosReauthorizationRequired
 from sonos_app.sonos_oauth_client import SonosAuthError
-from sonos_app.playback_metadata import parse_playback_metadata
+from sonos_app.playback_metadata import PlaybackMetadata, parse_playback_metadata
 from sonos_app.playback_subscription import (
     PlaybackTargetChanged,
     PlaybackTargetUnavailable,
@@ -214,13 +214,45 @@ def verify_sonos_event_signature(
 
 async def reconcile_household_groups(household_id: str):
     try:
-        await reconcile_playback_target(household_id)
+        await reconcile_playback_target(
+            household_id, renew_after_seconds=subscription_renewer.renew_after_seconds
+        )
     except (PlaybackTargetChanged, PlaybackTargetUnavailable) as exc:
         logger.info("Sonos group reconciliation skipped: %s", exc)
     except SonosReauthorizationRequired as exc:
         logger.warning("Sonos group reconciliation requires reauthorization: %s", exc)
     except Exception:
         logger.exception("Sonos group reconciliation failed for household %s", household_id)
+
+
+async def process_playback_metadata(metadata: PlaybackMetadata):
+    """Queue metadata only after confirming that its group is currently playing."""
+    group_id = metadata.group_id
+    try:
+        target = db_client.load_playback_target()
+        if target is not None and group_id != target["group_id"]:
+            logger.info("Sonos metadata skipped for group %s: not the selected group", group_id)
+            return
+
+        tokens = load_tokens_or_reauthorize()
+        client = SonosClient(tokens, db_client, oauth_client)
+        status = await client.get_playback_status(group_id)
+        playback_state = status.get("playbackState") if isinstance(status, dict) else None
+        if playback_state != "PLAYBACK_STATE_PLAYING":
+            logger.info(
+                "Sonos metadata skipped for group %s: playback state=%s",
+                group_id, playback_state or "unknown",
+            )
+            return
+
+        if db_client.load_playback_target() != target:
+            logger.info("Sonos metadata skipped for group %s: playback target changed", group_id)
+            return
+        event_processor.process_metadata(metadata)
+    except SonosReauthorizationRequired as exc:
+        logger.warning("Sonos metadata skipped for group %s: reauthorization required: %s", group_id, exc)
+    except Exception:
+        logger.exception("Sonos metadata processing failed for group %s", group_id)
 
 
 @app.post("/sonos/events")
@@ -255,12 +287,9 @@ async def sonos_events(request: Request, background_tasks: BackgroundTasks):
 
     body = await request.json()
     metadata = parse_playback_metadata(request.headers, body)
-    target = db_client.load_playback_target()
-    if target is not None and (metadata is None or metadata.group_id != target["group_id"]):
-        return JSONResponse({"ok": True})
-    event_processor.process_metadata(metadata)
-
-    return JSONResponse({"ok": True})
+    if metadata is not None and metadata.group_id:
+        background_tasks.add_task(process_playback_metadata, metadata)
+    return JSONResponse({"ok": True}, background=background_tasks)
 
 @app.get("/sonos/playback-target")
 def get_playback_target():
@@ -274,7 +303,8 @@ def set_playback_target(target: PlaybackTargetRequest):
 
 
 async def reconcile_playback_target(
-    household_id: str | None = None, *, subscribe_groups: bool = False
+    household_id: str | None = None, *, subscribe_groups: bool = False,
+    renew_after_seconds: int | None = None,
 ):
     async with subscription_lock:
         target = db_client.load_playback_target()
@@ -289,7 +319,11 @@ async def reconcile_playback_target(
         if subscribe_groups:
             await client.subscribe_groups(household_id)
             db_client.save_groups_subscription(household_id)
-        subscription = await subscribe_target_metadata(client, db_client, target)
+        subscription = await subscribe_target_metadata(
+            client, db_client, target, renew_after_seconds=renew_after_seconds
+        )
+        if subscription is None:
+            return None
         return {
             "ok": True,
             "group_id": subscription["group_id"],
