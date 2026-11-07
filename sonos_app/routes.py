@@ -214,7 +214,9 @@ def verify_sonos_event_signature(
 
 async def reconcile_household_groups(household_id: str):
     try:
-        await reconcile_playback_target(household_id)
+        await reconcile_playback_target(
+            household_id, renew_after_seconds=subscription_renewer.renew_after_seconds
+        )
     except (PlaybackTargetChanged, PlaybackTargetUnavailable) as exc:
         logger.info("Sonos group reconciliation skipped: %s", exc)
     except SonosReauthorizationRequired as exc:
@@ -301,7 +303,8 @@ def set_playback_target(target: PlaybackTargetRequest):
 
 
 async def reconcile_playback_target(
-    household_id: str | None = None, *, subscribe_groups: bool = False
+    household_id: str | None = None, *, subscribe_groups: bool = False,
+    renew_after_seconds: int | None = None,
 ):
     async with subscription_lock:
         target = db_client.load_playback_target()
@@ -316,7 +319,11 @@ async def reconcile_playback_target(
         if subscribe_groups:
             await client.subscribe_groups(household_id)
             db_client.save_groups_subscription(household_id)
-        subscription = await subscribe_target_metadata(client, db_client, target)
+        subscription = await subscribe_target_metadata(
+            client, db_client, target, renew_after_seconds=renew_after_seconds
+        )
+        if subscription is None:
+            return None
         return {
             "ok": True,
             "group_id": subscription["group_id"],

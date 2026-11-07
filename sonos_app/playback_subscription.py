@@ -19,8 +19,8 @@ async def subscribe_target_metadata(
 ):
     """Subscribe to the selected speaker, rediscovering once after a gone group.
 
-    Callers hold the shared subscription lock for this operation. Periodic checks
-    supply a renewal age to skip a healthy, unchanged subscription and return None.
+    Callers hold the shared subscription lock for this operation. Supplying a
+    renewal age skips a healthy, unchanged subscription and returns None.
     """
     household_id, player_id = target["household_id"], target["player_id"]
     group_id = None
