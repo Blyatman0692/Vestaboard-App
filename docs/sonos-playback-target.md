@@ -80,6 +80,14 @@ is ignored. Background reconciliation and the renewal loop share a lock within
 the web process to prevent overlapping subscription updates. The provided
 `Procfile` runs one web worker; this lock does not coordinate multiple processes.
 
+Metadata events are acknowledged before a background task checks
+`GET /groups/{groupId}/playback`. A message is queued only when `playbackState` is
+`PLAYBACK_STATE_PLAYING` and the saved target has not changed during the lookup.
+Paused, idle, buffering, missing, and unknown states are skipped and logged.
+Failed lookups or missing authorization are logged and do not enqueue a message.
+This check happens before enqueueing; it does not recheck playback at delivery or
+add a playback-status subscription to handle resuming the same track.
+
 Sonos API failures expose `status_code` and `error_code` through `SonosAPIError`.
 For a metadata subscription failure with HTTP 410, the failed group is marked
 inactive and its cached ID is cleared immediately. The saved speaker is then
