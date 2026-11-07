@@ -100,6 +100,14 @@ class PlaybackTargetTests(unittest.TestCase):
             for awaited in self.sonos_post.await_args_list
         ))
 
+    def post_metadata_event(self, group_id="current-group"):
+        return self.client.post("/sonos/events", json={
+            "currentItem": {"track": {"name": "Test song"}}
+        }, headers=self.event_headers(
+            namespace="playbackMetadata", event_type="metadataStatus",
+            target_type="groupId", target_value=group_id,
+        ))
+
     @staticmethod
     def gone_error():
         return SonosAPIError(410, '{"errorCode":"ERROR_RESOURCE_GONE"}')
@@ -425,15 +433,158 @@ class PlaybackTargetTests(unittest.TestCase):
     def test_old_metadata_is_ignored_and_current_metadata_is_processed(self):
         self.select()
         self.cache_group("new-group")
-        body = {"currentItem": {"track": {"name": "Test song"}}}
+        self.sonos_get.return_value = {"playbackState": "PLAYBACK_STATE_PLAYING"}
         for group_id in ("old-group", "new-group"):
-            response = self.client.post("/sonos/events", json=body, headers=self.event_headers(
-                namespace="playbackMetadata", event_type="metadataStatus",
-                target_type="groupId", target_value=group_id,
-            ))
+            response = self.post_metadata_event(group_id)
             self.assertEqual(response.status_code, 200)
+        self.sonos_get.assert_awaited_once_with(f"{SONOS_CONTROL_BASE_URL}/groups/new-group/playback")
         self.routes.event_processor.process_metadata.assert_called_once()
         self.assertEqual(self.routes.event_processor.process_metadata.call_args.args[0].group_id, "new-group")
+
+    def test_metadata_is_skipped_unless_playback_is_confirmed_playing(self):
+        self.select()
+        self.cache_group("current-group")
+        statuses = [
+            {"playbackState": state} for state in (
+                "PLAYBACK_STATE_PAUSED", "PLAYBACK_STATE_IDLE", "PLAYBACK_STATE_BUFFERING",
+                "UNRECOGNIZED_STATE", "", None,
+            )
+        ] + [{}, None, []]
+        for status in statuses:
+            with self.subTest(status=status), patch.object(self.routes.logger, "info") as log:
+                self.sonos_get.return_value = status
+
+                response = self.post_metadata_event()
+
+                self.assertEqual(response.status_code, 200)
+                log.assert_called_once()
+                self.assertIn("playback state=%s", log.call_args.args[0])
+                self.routes.event_processor.process_metadata.assert_not_called()
+        self.assertEqual(self.sonos_get.await_count, len(statuses))
+        self.sonos_post.assert_not_awaited()
+
+    def test_metadata_lookup_failures_are_logged_without_enqueueing(self):
+        self.select()
+        self.cache_group("current-group")
+        for error in (
+            self.gone_error(), SonosAPIError(429, "Rate limited"), SonosAPIError(503, "Unavailable"),
+            httpx.ReadTimeout("Timed out"), ValueError("Invalid JSON"),
+        ):
+            with self.subTest(error=error), patch.object(self.routes.logger, "exception") as log:
+                self.sonos_get.side_effect = error
+
+                response = self.post_metadata_event()
+
+                self.assertEqual(response.status_code, 200)
+                log.assert_called_once()
+                self.routes.event_processor.process_metadata.assert_not_called()
+        self.sonos_post.assert_not_awaited()
+
+    def test_metadata_requires_usable_authorization_before_enqueueing(self):
+        self.select()
+        self.cache_group("current-group")
+        for tokens, error in (
+            (None, None),
+            (SonosToken("access-token", "refresh-token"), SonosReauthorizationRequired("Start OAuth again.")),
+        ):
+            with self.subTest(tokens=tokens), patch.object(self.routes.logger, "warning") as log:
+                self.load_tokens.return_value = tokens
+                self.sonos_get.side_effect = error
+
+                response = self.post_metadata_event()
+
+                self.assertEqual(response.status_code, 200)
+                log.assert_called_once()
+                self.routes.event_processor.process_metadata.assert_not_called()
+        self.sonos_get.assert_awaited_once()
+
+    def test_legacy_metadata_without_a_saved_target_also_checks_playback(self):
+        self.sonos_get.return_value = {"playbackState": "PLAYBACK_STATE_PAUSED"}
+        self.assertEqual(self.post_metadata_event().status_code, 200)
+        self.routes.event_processor.process_metadata.assert_not_called()
+
+        self.sonos_get.return_value = {"playbackState": "PLAYBACK_STATE_PLAYING"}
+        self.assertEqual(self.post_metadata_event().status_code, 200)
+        self.routes.event_processor.process_metadata.assert_called_once()
+
+    def test_metadata_acknowledgment_precedes_the_playback_lookup(self):
+        self.select()
+        self.cache_group("current-group")
+        messages = []
+
+        async def get_playback_status(url):
+            self.assertTrue(any(
+                message["type"] == "http.response.body" and not message.get("more_body", False)
+                for message in messages
+            ))
+            return {"playbackState": "PLAYBACK_STATE_PLAYING"}
+
+        async def send(message):
+            messages.append(message)
+
+        self.sonos_get.side_effect = get_playback_status
+        headers = self.event_headers(
+            namespace="playbackMetadata", event_type="metadataStatus",
+            target_type="groupId", target_value="current-group",
+        )
+        scope = {
+            "type": "http", "http_version": "1.1", "method": "POST",
+            "path": "/sonos/events", "raw_path": b"/sonos/events", "query_string": b"",
+            "scheme": "https", "server": ("testserver", 443), "client": ("testclient", 123),
+            "headers": [(key.lower().encode(), value.encode()) for key, value in headers.items()],
+        }
+        receive = AsyncMock(return_value={
+            "type": "http.request", "body": b'{"currentItem":{"track":{"name":"Test song"}}}',
+        })
+        asyncio.run(self.routes.app(scope, receive, send))
+        self.assertEqual(messages[0]["status"], 200)
+        self.sonos_get.assert_awaited_once()
+        self.routes.event_processor.process_metadata.assert_called_once()
+
+    def test_target_changes_during_playback_lookup_prevent_enqueueing(self):
+        for change_player in (False, True):
+            with self.subTest(change_player=change_player):
+                self.select()
+                self.cache_group("current-group")
+
+                async def change_target(url):
+                    if change_player:
+                        self.store.save_playback_target("household-1", "player-2")
+                    else:
+                        self.cache_group("replacement-group")
+                    return {"playbackState": "PLAYBACK_STATE_PLAYING"}
+
+                self.sonos_get.side_effect = change_target
+
+                response = self.post_metadata_event()
+
+                self.assertEqual(response.status_code, 200)
+                self.routes.event_processor.process_metadata.assert_not_called()
+
+    def test_metadata_without_a_track_or_group_does_not_query_playback(self):
+        for target_type, body in (
+            ("groupId", {}),
+            ("householdId", {"currentItem": {"track": {"name": "Test song"}}}),
+        ):
+            response = self.client.post("/sonos/events", json=body, headers=self.event_headers(
+                namespace="playbackMetadata", event_type="metadataStatus",
+                target_type=target_type, target_value="current-group",
+            ))
+            self.assertEqual(response.status_code, 200)
+        self.sonos_get.assert_not_awaited()
+        self.routes.event_processor.process_metadata.assert_not_called()
+
+    def test_metadata_processing_failure_is_logged_after_acknowledgment(self):
+        self.select()
+        self.cache_group("current-group")
+        self.sonos_get.return_value = {"playbackState": "PLAYBACK_STATE_PLAYING"}
+        self.routes.event_processor.process_metadata.side_effect = RuntimeError("Queue unavailable")
+
+        with patch.object(self.routes.logger, "exception") as log:
+            response = self.post_metadata_event()
+
+        self.assertEqual(response.status_code, 200)
+        log.assert_called_once()
 
     def test_selection_changed_during_subscription_is_not_recorded_for_the_new_target(self):
         self.select()
